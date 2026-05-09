@@ -1,18 +1,26 @@
-import { computeMetrics } from "../simulation/analysis";
-import type { SimulationState } from "../simulation/types";
+import type { SimulationMetrics } from "../simulation/types";
 
 type MetricsPanelProps = {
-  state: SimulationState;
+  metrics: SimulationMetrics;
+  animalCount: number;
 };
 
-export function MetricsPanel({ state }: MetricsPanelProps) {
-  const metrics = computeMetrics(state);
-  const scanEffort = state.animals.length > 0 ? metrics.scanWindows / state.animals.length : 0;
+export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
+  const scanEffort = animalCount > 0 ? metrics.scanWindows / animalCount : 0;
 
   return (
     <section className="panel metrics-panel">
-      <h2>Phase 1 Metrics</h2>
+      <h2>Whole-Simulation Policy Metrics</h2>
       <div className="metric-grid">
+        <Metric
+          label="BLE capture rate"
+          value={`${Math.round(metrics.bleCaptureRate * 100)}%`}
+          emphasized
+        />
+        <Metric
+          label="Captured in-range intervals"
+          value={`${metrics.bleCaptureHits} / ${metrics.bleCaptureOpportunities}`}
+        />
         <Metric label="True contact steps" value={metrics.trueContactSteps.toString()} />
         <Metric label="Observed detections" value={metrics.observedDetections.toString()} />
         <Metric label="Unique observed dyads" value={metrics.uniqueObservedDyads.toString()} />
@@ -20,15 +28,22 @@ export function MetricsPanel({ state }: MetricsPanelProps) {
         <Metric label="Negative scan windows" value={metrics.negativeScanWindows.toString()} />
         <Metric label="Detections / opportunity" value={metrics.recallEstimate.toFixed(2)} />
         <Metric label="Scan windows / animal" value={scanEffort.toFixed(1)} />
-        <Metric label="Current detections" value={state.detections.length.toString()} />
+        <Metric label="Animals with scan bursts" value={metrics.scanningAnimals.toString()} />
+        <Metric label="Animals with ad bursts" value={metrics.advertisingAnimals.toString()} />
+        <Metric label="Mean sampling drive" value={metrics.meanSamplingDrive.toFixed(2)} />
+        <Metric label="Mean scan interval" value={`${Math.round(metrics.meanScanIntervalSeconds)}s`} />
+        <Metric label="Energy used" value={`${metrics.energyUsedMah.toFixed(3)} mAh`} />
+        <Metric label="Battery remaining" value={`${Math.round(metrics.batteryRemainingPercent * 100)}%`} />
+        <Metric label="Estimated voltage" value={`${metrics.estimatedVoltage.toFixed(2)} V`} />
+        <Metric label="Capture / mAh" value={metrics.capturePerMah.toFixed(1)} />
       </div>
     </section>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, emphasized = false }: { label: string; value: string; emphasized?: boolean }) {
   return (
-    <div className="metric-card">
+    <div className={emphasized ? "metric-card metric-card-primary" : "metric-card"}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

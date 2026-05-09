@@ -1,55 +1,100 @@
 import { getEdge, interpolateEdge } from "./geometry";
-import { applyFixedRatePolicy, createScanWindowLog } from "./policies/fixedRate";
+import { computeEnergyLog } from "./energy";
+import { computeMotionObservations } from "./motionSensor";
+import { applyFirmwarePolicy } from "./policies/adaptive";
 import { SeededRandom } from "./random";
-import { computeTrueContacts, simulateBleDetections } from "./radio";
+import {
+  computeTrueContacts,
+  createAdvertisingEventsFromBursts,
+  createBleBurstEvents,
+  createScanWindowEventsFromBursts,
+  simulateBleDetections
+} from "./radio";
 import { arriveAtNode, chooseBehaviorState, chooseNextEdge, enterEdge } from "./world";
 import type {
   Animal,
   AnimalObservation,
   AnimalStateLog,
+  BleBurstEvent,
   CollarStateLog,
   DetectionEvent,
+  ScanWindowEvent,
   ScanWindowLog,
   SimulationState,
   TrueContact,
   TrueDyadLog
 } from "./types";
 
+const movementSpeedMetersPerMinute = 1.2;
+
 export function stepSimulation(state: SimulationState): SimulationState {
   const rng = SeededRandom.fromState(state.rngState);
   const dtSeconds = state.config.timeStepSeconds;
   const time = state.time + dtSeconds;
+  const absoluteTime = state.config.startTimeSeconds + time;
 
-  const movedAnimals = updateAnimalPositions(state.animals, state, time, dtSeconds, rng);
+  const movedAnimals = updateAnimalPositions(state.animals, state, absoluteTime, dtSeconds, rng);
+  const observations = computeMotionObservations(time, state.animals, movedAnimals, state.config.motionSensor, rng);
+  const observationByAnimal = new Map(observations.map((observation) => [observation.animalId, observation]));
   const animalsWithPolicy = movedAnimals.map((animal) =>
-    applyFixedRatePolicy(animal, state.config.fixedPolicy, time, dtSeconds)
+    applyFirmwarePolicy(
+      animal,
+      state.config.activePolicy,
+      observationByAnimal.get(animal.id) ?? {
+        time,
+        animalId: animal.id,
+        motionDetected: false,
+        motionMagnitude: 0,
+        collarValid: animal.collar.valid
+      },
+      state.detections,
+      time,
+      dtSeconds
+    )
   );
-  const trueContacts = computeTrueContacts(animalsWithPolicy, state.config.radio, time);
-  const detections = simulateBleDetections(
+  const epochStart = time - dtSeconds;
+  const bleBursts = createBleBurstEvents(
     animalsWithPolicy,
+    state.config.activePolicy.id,
+    epochStart,
+    time
+  );
+  const animalsWithBurstState = applyBurstState(animalsWithPolicy, bleBursts);
+  const trueContacts = computeTrueContacts(animalsWithBurstState, state.config.radio, time);
+  const scanWindowEvents = createScanWindowEventsFromBursts(bleBursts);
+  const advertisingEvents = createAdvertisingEventsFromBursts(bleBursts);
+  const detections = simulateBleDetections(
+    animalsWithBurstState,
     trueContacts,
     state.config.radio,
-    state.config.fixedPolicy.id,
+    state.config.activePolicy.id,
     time,
-    rng
+    rng,
+    bleBursts
   );
-  const scanWindows = createScanWindowLogs(animalsWithPolicy, state.config.fixedPolicy.id, time, detections);
-  const observations = createMotionObservations(time, state.animals, animalsWithPolicy);
+  const scanWindows = createScanWindowLogs(scanWindowEvents, detections);
+  const energy = computeEnergyLog(time, dtSeconds, bleBursts, state.config.energy, state.energy.cumulativeMah);
+  const frameLogs = {
+    animalStates: createAnimalStateLogs(time, animalsWithBurstState, observations),
+    trueDyads: createTrueDyadLogs(trueContacts, animalsWithBurstState),
+    detections,
+    bleBursts,
+    scanWindows,
+    collarStates: createCollarStateLogs(time, animalsWithBurstState),
+    energy: [energy]
+  };
 
   return {
     ...state,
     time,
-    animals: animalsWithPolicy,
+    animals: animalsWithBurstState,
     trueContacts,
     detections,
+    bleBursts,
     scanWindows,
-    logs: {
-      animalStates: [...state.logs.animalStates, ...createAnimalStateLogs(time, animalsWithPolicy, observations)],
-      trueDyads: [...state.logs.trueDyads, ...createTrueDyadLogs(trueContacts, animalsWithPolicy)],
-      detections: [...state.logs.detections, ...detections],
-      scanWindows: [...state.logs.scanWindows, ...scanWindows],
-      collarStates: [...state.logs.collarStates, ...createCollarStateLogs(time, animalsWithPolicy)]
-    },
+    advertisingEvents,
+    energy,
+    logs: frameLogs,
     rngState: rng.getState()
   };
 }
@@ -57,9 +102,45 @@ export function stepSimulation(state: SimulationState): SimulationState {
 export function runSimulation(initialState: SimulationState, steps: number): SimulationState {
   let state = initialState;
   for (let index = 0; index < steps; index += 1) {
-    state = stepSimulation(state);
+    const next = stepSimulation(state);
+    state = {
+      ...next,
+      logs: mergeLogs(state.logs, next.logs)
+    };
   }
   return state;
+}
+
+export function mergeLogs(left: SimulationState["logs"], right: SimulationState["logs"]): SimulationState["logs"] {
+  return {
+    animalStates: [...left.animalStates, ...right.animalStates],
+    trueDyads: [...left.trueDyads, ...right.trueDyads],
+    detections: [...left.detections, ...right.detections],
+    bleBursts: [...left.bleBursts, ...right.bleBursts],
+    scanWindows: [...left.scanWindows, ...right.scanWindows],
+    collarStates: [...left.collarStates, ...right.collarStates],
+    energy: [...left.energy, ...right.energy]
+  };
+}
+
+function applyBurstState(animals: Animal[], bursts: BleBurstEvent[]): Animal[] {
+  return animals.map((animal) => {
+    const animalBursts = bursts.filter((burst) => burst.animalId === animal.id);
+    const scanBursts = animalBursts.filter((burst) => burst.kind === "scan");
+    const advBursts = animalBursts.filter((burst) => burst.kind === "advertise");
+    const lastScan = scanBursts.at(-1);
+    const lastAdv = advBursts.at(-1);
+    return {
+      ...animal,
+      collar: {
+        ...animal.collar,
+        scanActive: scanBursts.length > 0,
+        advActive: advBursts.length > 0,
+        lastScanTime: lastScan?.endTime ?? animal.collar.lastScanTime,
+        lastAdvTime: lastAdv?.endTime ?? animal.collar.lastAdvTime
+      }
+    };
+  });
 }
 
 function updateAnimalPositions(
@@ -73,7 +154,7 @@ function updateAnimalPositions(
     let nextAnimal = animal;
     const boutRemainingSeconds = animal.boutRemainingSeconds - dtSeconds;
     if (boutRemainingSeconds <= 0) {
-      const nextState = chooseBehaviorState(time, animal, rng);
+      const nextState = chooseBehaviorState(time, animal, state.config.behavior, rng);
       nextAnimal = {
         ...nextAnimal,
         state: nextState,
@@ -96,7 +177,7 @@ function updateAnimalPositions(
     }
 
     const edge = getEdge(state.pathGraph, nextAnimal.position.edgeId ?? "");
-    const distanceThisStep = nextAnimal.traits.speedMetersPerMinute * (dtSeconds / 60);
+    const distanceThisStep = movementSpeedMetersPerMinute * (dtSeconds / 60);
     const progressDelta = edge.length > 0 ? distanceThisStep / edge.length : 1;
     const progress = Math.min(1, nextAnimal.position.progress + progressDelta);
     const point = interpolateEdge(state.pathGraph, nextAnimal.position.fromNodeId, nextAnimal.position.toNodeId, progress);
@@ -128,43 +209,19 @@ function boutLengthSeconds(state: Animal["state"], animal: Animal, rng: SeededRa
   return rng.range(2 * 60, 10 * 60);
 }
 
-function createMotionObservations(time: number, previousAnimals: Animal[], animals: Animal[]): AnimalObservation[] {
-  const previousById = new Map(previousAnimals.map((animal) => [animal.id, animal]));
-  return animals.map((animal) => {
-    const previous = previousById.get(animal.id);
-    const distanceMoved = previous ? Math.hypot(animal.position.x - previous.position.x, animal.position.y - previous.position.y) : 0;
-    const motionMagnitude = distanceMoved;
-    return {
-      time,
-      animalId: animal.id,
-      motionDetected: motionMagnitude > 0.01,
-      motionMagnitude,
-      collarValid: animal.collar.valid
-    };
-  });
-}
-
-function createScanWindowLogs(
-  animals: Animal[],
-  policyId: string,
-  time: number,
-  detections: DetectionEvent[]
-): ScanWindowLog[] {
-  return animals.flatMap((animal) => {
-    const window = createScanWindowLog(animal, { ...animal.collar, id: policyId, type: "fixed" }, time);
-    if (!window) {
-      return [];
-    }
+function createScanWindowLogs(scanWindowEvents: ScanWindowEvent[], detections: DetectionEvent[]): ScanWindowLog[] {
+  return scanWindowEvents.map((window) => {
     const detectedPeerIds = detections
-      .filter((event) => event.observerId === animal.id)
+      .filter(
+        (event) =>
+          event.observerId === window.observerId && event.time >= window.startTime && event.time <= window.endTime
+      )
       .map((event) => event.peerId);
-    return [
-      {
-        ...window,
-        detectedPeerIds,
-        detectedAnyPeer: detectedPeerIds.length > 0
-      }
-    ];
+    return {
+      ...window,
+      detectedPeerIds: [...new Set(detectedPeerIds)],
+      detectedAnyPeer: detectedPeerIds.length > 0
+    };
   });
 }
 

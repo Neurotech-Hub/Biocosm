@@ -1,25 +1,33 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { AssumptionsPanel } from "./components/AssumptionsPanel";
 import { CanvasVisualizer } from "./components/CanvasVisualizer";
 import { ControlsPanel } from "./components/ControlsPanel";
+import { LegendPanel } from "./components/LegendPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
+import { RawDataPanel } from "./components/RawDataPanel";
+import { TimeSeriesPanel } from "./components/TimeSeriesPanel";
+import { TimelinePanel } from "./components/TimelinePanel";
+import { computeMetrics } from "./simulation/analysis";
 import { defaultSimulationConfig } from "./simulation/config";
-import { stepSimulation } from "./simulation/engine";
-import type { SimulationConfig } from "./simulation/types";
+import { mergeLogs, stepSimulation } from "./simulation/engine";
+import { buildTimeSeries, type TimeSeriesPoint } from "./simulation/timeSeries";
+import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationState } from "./simulation/types";
 import { createInitialSimulation } from "./simulation/world";
 
 export function App() {
-  const [config, setConfig] = useState<SimulationConfig>(defaultSimulationConfig);
-  const initialState = useMemo(() => createInitialSimulation(config), [config]);
-  const [simulation, setSimulation] = useState(initialState);
+  const [draftConfig, setDraftConfig] = useState<SimulationConfig>(defaultSimulationConfig);
+  const [builtConfig, setBuiltConfig] = useState<SimulationConfig>(defaultSimulationConfig);
+  const [build, setBuild] = useState<SimulationBuild>(() => createSimulationBuild(createInitialSimulation(defaultSimulationConfig)));
+  const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuildDirty, setIsBuildDirty] = useState(false);
+  const [buildProgress, setBuildProgress] = useState<BuildProgress>({ isBuilding: false, percent: 100 });
   const [speed, setSpeed] = useState(10);
   const [showTrueProximity, setShowTrueProximity] = useState(true);
   const [showObservedDetections, setShowObservedDetections] = useState(true);
-
-  useEffect(() => {
-    setSimulation(initialState);
-    setIsPlaying(false);
-  }, [initialState]);
+  const timeline = build.timeline;
+  const simulation = timeline[currentStep] ?? timeline[0];
+  const totalSteps = Math.max(0, timeline.length - 1);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -27,17 +35,17 @@ export function App() {
     }
 
     const interval = window.setInterval(() => {
-      setSimulation((current) => {
-        if (current.time >= current.config.simulationLengthSeconds) {
+      setCurrentStep((step) => {
+        if (step >= totalSteps) {
           setIsPlaying(false);
-          return current;
+          return step;
         }
-        return stepSimulation(current);
+        return step + 1;
       });
     }, Math.max(30, 1000 / speed));
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, speed]);
+  }, [isPlaying, speed, totalSteps]);
 
   return (
     <main className="app-shell">
@@ -46,28 +54,86 @@ export function App() {
           <h1>Adaptive Social Proximity Logger Simulator</h1>
           <p>Phase 1: deterministic world truth, fixed-rate BLE observations, and live true-vs-observed review.</p>
         </div>
-        <div className="header-pill">Seed: {config.seed}</div>
+        <div className="header-pill">
+          {buildProgress.isBuilding
+            ? `Building ${buildProgress.percent}%`
+            : `Built seed: ${builtConfig.seed}${isBuildDirty ? " (settings changed)" : ""}`}
+        </div>
       </header>
 
       <section className="workspace">
         <div className="visual-column">
+          <TimelinePanel
+            currentStep={currentStep}
+            totalSteps={totalSteps}
+            timeSeconds={simulation.time}
+            startTimeSeconds={builtConfig.startTimeSeconds}
+            timeStepSeconds={builtConfig.timeStepSeconds}
+            onStepChange={(step) => {
+              setIsPlaying(false);
+              setCurrentStep(step);
+            }}
+          />
           <CanvasVisualizer
             state={simulation}
             showTrueProximity={showTrueProximity}
             showObservedDetections={showObservedDetections}
           />
-          <MetricsPanel state={simulation} />
+          <TimeSeriesPanel points={build.timeSeries} energy={build.logs.energy} currentStep={currentStep} />
+          <LegendPanel />
+          <MetricsPanel metrics={build.metrics} animalCount={builtConfig.animalCount} />
+          <RawDataPanel logs={build.logs} config={builtConfig} />
+          <AssumptionsPanel config={builtConfig} />
         </div>
         <ControlsPanel
-          config={config}
+          config={draftConfig}
+          isBuildDirty={isBuildDirty}
+          buildProgress={buildProgress}
           isPlaying={isPlaying}
           speed={speed}
           showTrueProximity={showTrueProximity}
           showObservedDetections={showObservedDetections}
-          onConfigChange={setConfig}
-          onPlayPause={() => setIsPlaying((playing) => !playing)}
-          onReset={() => setSimulation(createInitialSimulation(config))}
-          onStep={() => setSimulation((current) => stepSimulation(current))}
+          onConfigChange={(nextConfig) => {
+            setDraftConfig(nextConfig);
+            setIsBuildDirty(true);
+            setIsPlaying(false);
+          }}
+          onBuildSimulation={() => {
+            if (buildProgress.isBuilding) {
+              return;
+            }
+
+            setIsPlaying(false);
+            setBuildProgress({ isBuilding: true, percent: 0 });
+            const configToBuild = draftConfig;
+
+            window.setTimeout(() => {
+              createTimelineAsync(
+                createInitialSimulation(configToBuild),
+                (percent) => setBuildProgress({ isBuilding: true, percent }),
+                (nextBuild) => {
+                  setBuiltConfig(configToBuild);
+                  setBuild(nextBuild);
+                  setCurrentStep(0);
+                  setIsBuildDirty(false);
+                  setBuildProgress({ isBuilding: false, percent: 100 });
+                }
+              );
+            }, 0);
+          }}
+          onPlayPause={() => {
+            if (!buildProgress.isBuilding) {
+              setIsPlaying((playing) => !playing);
+            }
+          }}
+          onReset={() => {
+            setIsPlaying(false);
+            setCurrentStep(0);
+          }}
+          onStep={() => {
+            setIsPlaying(false);
+            setCurrentStep((step) => Math.min(totalSteps, step + 1));
+          }}
           onSpeedChange={setSpeed}
           onShowTrueProximityChange={setShowTrueProximity}
           onShowObservedDetectionsChange={setShowObservedDetections}
@@ -75,4 +141,74 @@ export function App() {
       </section>
     </main>
   );
+}
+
+export type BuildProgress = {
+  isBuilding: boolean;
+  percent: number;
+};
+
+type SimulationBuild = {
+  timeline: SimulationState[];
+  logs: SimulationLogs;
+  timeSeries: TimeSeriesPoint[];
+  metrics: SimulationMetrics;
+};
+
+function createSimulationBuild(initialState: SimulationState): SimulationBuild {
+  const timeline = [initialState];
+  let logs = initialState.logs;
+  const totalSteps = Math.floor(initialState.config.simulationLengthSeconds / initialState.config.timeStepSeconds);
+  let current = initialState;
+
+  for (let step = 0; step < totalSteps; step += 1) {
+    current = stepSimulation(current);
+    logs = mergeLogs(logs, current.logs);
+    timeline.push(current);
+  }
+
+  return {
+    timeline,
+    logs,
+    timeSeries: buildTimeSeries(timeline),
+    metrics: computeMetrics(current, logs)
+  };
+}
+
+function createTimelineAsync(
+  initialState: SimulationState,
+  onProgress: (percent: number) => void,
+  onComplete: (build: SimulationBuild) => void
+): void {
+  const timeline = [initialState];
+  let logs = initialState.logs;
+  const totalSteps = Math.floor(initialState.config.simulationLengthSeconds / initialState.config.timeStepSeconds);
+  const chunkSize = Math.max(10, Math.ceil(totalSteps / 60));
+  let current = initialState;
+  let step = 0;
+
+  const buildChunk = () => {
+    const chunkEnd = Math.min(totalSteps, step + chunkSize);
+    for (; step < chunkEnd; step += 1) {
+      current = stepSimulation(current);
+      logs = mergeLogs(logs, current.logs);
+      timeline.push(current);
+    }
+
+    onProgress(totalSteps > 0 ? Math.min(99, Math.round((step / totalSteps) * 100)) : 100);
+
+    if (step < totalSteps) {
+      window.setTimeout(buildChunk, 0);
+      return;
+    }
+
+    onComplete({
+      timeline,
+      logs,
+      timeSeries: buildTimeSeries(timeline),
+      metrics: computeMetrics(current, logs)
+    });
+  };
+
+  buildChunk();
 }

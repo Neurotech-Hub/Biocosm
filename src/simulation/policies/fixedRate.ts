@@ -1,4 +1,4 @@
-import type { Animal, FixedPolicyConfig, ScanWindowLog } from "../types";
+import type { Animal, FirmwarePolicyConfig, FixedPolicyConfig, ScanWindowLog } from "../types";
 
 export function applyFixedRatePolicy(
   animal: Animal,
@@ -6,29 +6,25 @@ export function applyFixedRatePolicy(
   timeSeconds: number,
   dtSeconds: number
 ): Animal {
-  const scanPhase = positiveModulo(timeSeconds, policy.scanIntervalSeconds);
-  const advPhase = positiveModulo(timeSeconds, policy.advIntervalSeconds);
-  const scanActive = animal.collar.valid && scanPhase < Math.min(policy.scanWindowSeconds, dtSeconds);
-  const advActive = animal.collar.valid && advPhase < dtSeconds;
+  void timeSeconds;
+  void dtSeconds;
 
   return {
     ...animal,
     collar: {
       ...animal.collar,
-      scanActive,
-      advActive,
+      scanActive: false,
+      advActive: false,
       scanIntervalSeconds: policy.scanIntervalSeconds,
       scanWindowSeconds: policy.scanWindowSeconds,
-      advIntervalSeconds: policy.advIntervalSeconds,
-      lastScanTime: scanActive ? timeSeconds : animal.collar.lastScanTime,
-      lastAdvTime: advActive ? timeSeconds : animal.collar.lastAdvTime
+      advIntervalSeconds: policy.advIntervalSeconds
     }
   };
 }
 
 export function createScanWindowLog(
   animal: Animal,
-  policy: FixedPolicyConfig,
+  policy: Pick<FirmwarePolicyConfig, "id">,
   timeSeconds: number
 ): ScanWindowLog | undefined {
   if (!animal.collar.scanActive) {
@@ -37,7 +33,7 @@ export function createScanWindowLog(
 
   return {
     startTime: timeSeconds,
-    endTime: timeSeconds + policy.scanWindowSeconds,
+    endTime: timeSeconds + animal.collar.scanWindowSeconds,
     observerId: animal.id,
     scanPolicyId: policy.id,
     detectedPeerIds: [],
@@ -45,6 +41,44 @@ export function createScanWindowLog(
   };
 }
 
-function positiveModulo(value: number, divisor: number): number {
-  return ((value % divisor) + divisor) % divisor;
+export function getPolicyTiming(policy: FirmwarePolicyConfig): {
+  scanIntervalSeconds: number;
+  scanWindowSeconds: number;
+  advIntervalSeconds: number;
+} {
+  if (policy.type === "fixed") {
+    return {
+      scanIntervalSeconds: policy.scanIntervalSeconds,
+      scanWindowSeconds: policy.scanWindowSeconds,
+      advIntervalSeconds: policy.advIntervalSeconds
+    };
+  }
+
+  return {
+    scanIntervalSeconds: policy.scanIntervalMaxSeconds,
+    scanWindowSeconds: policy.scanWindowMinSeconds,
+    advIntervalSeconds: policy.advIntervalMaxSeconds
+  };
+}
+
+export function hasScheduledEventInEpoch(
+  epochStart: number,
+  epochEnd: number,
+  intervalSeconds: number,
+  phaseOffsetSeconds: number
+): boolean {
+  return firstScheduledTimeAtOrAfter(epochStart, intervalSeconds, phaseOffsetSeconds) < epochEnd;
+}
+
+export function firstScheduledTimeAtOrAfter(
+  timeSeconds: number,
+  intervalSeconds: number,
+  phaseOffsetSeconds: number
+): number {
+  if (intervalSeconds <= 0) {
+    return timeSeconds;
+  }
+
+  const cycle = Math.ceil((timeSeconds - phaseOffsetSeconds) / intervalSeconds);
+  return phaseOffsetSeconds + cycle * intervalSeconds;
 }

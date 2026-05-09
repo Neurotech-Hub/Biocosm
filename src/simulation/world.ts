@@ -1,9 +1,12 @@
 import { edgeLength, edgesForNode, getNode, interpolateEdge, otherNodeId } from "./geometry";
+import { getPolicyTiming } from "./policies/fixedRate";
 import { SeededRandom } from "./random";
 import type {
   Animal,
   AnimalState,
   AnimalTraits,
+  BehaviorConfig,
+  BiologyConfig,
   PathEdge,
   PathGraph,
   PathNode,
@@ -15,9 +18,8 @@ import type {
 export function createInitialSimulation(config: SimulationConfig): SimulationState {
   const rng = new SeededRandom(config.seed);
   const pathGraph = createPathGraph(config, rng);
-  const nestIds = pathGraph.nodes.filter((node) => node.type === "nest").map((node) => node.id);
   const animals = Array.from({ length: config.animalCount }, (_, index) =>
-    createAnimal(index, pathGraph, nestIds, config, rng)
+    createAnimal(index, pathGraph, config, rng)
   );
 
   return {
@@ -27,7 +29,20 @@ export function createInitialSimulation(config: SimulationConfig): SimulationSta
     animals,
     trueContacts: [],
     detections: [],
+    bleBursts: [],
     scanWindows: [],
+    advertisingEvents: [],
+    energy: {
+      time: 0,
+      steadyMah: 0,
+      scanMah: 0,
+      advertisingMah: 0,
+      totalMah: 0,
+      cumulativeMah: 0,
+      remainingMah: config.energy.batteryCapacityMah,
+      remainingPercent: 1,
+      estimatedVoltage: config.energy.startingVoltage
+    },
     logs: createEmptyLogs(),
     rngState: rng.getState()
   };
@@ -38,8 +53,10 @@ export function createEmptyLogs(): SimulationLogs {
     animalStates: [],
     trueDyads: [],
     detections: [],
+    bleBursts: [],
     scanWindows: [],
-    collarStates: []
+    collarStates: [],
+    energy: []
   };
 }
 
@@ -50,7 +67,7 @@ export function createPathGraph(config: SimulationConfig, rng: SeededRandom): Pa
     id: `node-${index + 1}`,
     x: rng.range(width * 0.08, width * 0.92),
     y: rng.range(height * 0.08, height * 0.92),
-    type: nodeTypeForIndex(index, nodeCount)
+    type: nodeTypeForIndex(index)
   }));
 
   const edges: PathEdge[] = [];
@@ -89,14 +106,10 @@ export function chooseNextEdge(
     const nextNodeId = otherNodeId(edge, currentNodeId);
     const nextNode = getNode(graph, nextNodeId);
     const novelty = animal.recentNodeIds.includes(nextNodeId) ? 0.3 : 1;
-    const nestDrive = nextNodeId === animal.preferredNestId ? animal.traits.nestFidelity : 0.1;
-    const resourceDrive = nextNode.type === "resource" || nextNode.type === "feeder" ? animal.traits.resourceAttraction : 0.1;
     const peerAttraction = nearbyPeerScore(nextNode, animal, animals);
 
     return (
-      animal.traits.explorationTendency * novelty +
-      nestDrive +
-      resourceDrive +
+      novelty +
       animal.traits.socialPropensity * peerAttraction +
       0.05
     );
@@ -146,19 +159,21 @@ export function arriveAtNode(animal: Animal, graph: PathGraph, nodeId: string): 
 function createAnimal(
   index: number,
   graph: PathGraph,
-  nestIds: string[],
   config: SimulationConfig,
   rng: SeededRandom
 ): Animal {
   const id = `animal-${index + 1}`;
-  const preferredNestId = nestIds[index % nestIds.length] ?? graph.nodes[0].id;
-  const startNode = getNode(graph, preferredNestId);
-  const traits = createTraits(id, rng);
+  const startNode = graph.nodes[index % graph.nodes.length];
+  const traits = createTraits(id, config.biology, rng);
+  const policyTiming = getPolicyTiming(config.activePolicy);
+  const scanPhaseOffsetSeconds = rng.range(0, policyTiming.scanIntervalSeconds);
+  const advPhaseOffsetSeconds = rng.range(0, policyTiming.advIntervalSeconds);
+  const initialState = chooseBehaviorStateFromTraits(config.startTimeSeconds, traits, config.behavior, rng);
 
   return {
     id,
     traits,
-    state: index % 3 === 0 ? "awake_stationary" : "moving",
+    state: initialState,
     position: {
       mode: "node",
       nodeId: startNode.id,
@@ -174,47 +189,42 @@ function createAnimal(
       batteryMahRemaining: 100,
       scanActive: false,
       advActive: false,
-      scanIntervalSeconds: config.fixedPolicy.scanIntervalSeconds,
-      scanWindowSeconds: config.fixedPolicy.scanWindowSeconds,
-      advIntervalSeconds: config.fixedPolicy.advIntervalSeconds,
+      scanIntervalSeconds: policyTiming.scanIntervalSeconds,
+      scanWindowSeconds: policyTiming.scanWindowSeconds,
+      advIntervalSeconds: policyTiming.advIntervalSeconds,
+      scanPhaseOffsetSeconds,
+      advPhaseOffsetSeconds,
       motionDrive: 0,
       peerDrive: 0,
       samplingDrive: 0,
-      lastScanTime: 0,
-      lastAdvTime: 0
+      lastScanTime: scanPhaseOffsetSeconds - policyTiming.scanIntervalSeconds,
+      lastAdvTime: advPhaseOffsetSeconds - policyTiming.advIntervalSeconds
     },
-    boutRemainingSeconds: rng.range(2 * 60, 12 * 60),
-    preferredNestId,
+    boutRemainingSeconds: initialBoutRemainingSeconds(initialState, traits, rng),
     recentNodeIds: [startNode.id]
   };
 }
 
-function createTraits(id: string, rng: SeededRandom): AnimalTraits {
+export function createTraits(id: string, biology: BiologyConfig, rng: SeededRandom): AnimalTraits {
   return {
     id,
-    circadianPhaseOffsetHours: rng.range(-2, 2),
-    dailyActivityMinutes: rng.triangular(180, 420, 720),
-    majorSleepPeriodHours: rng.triangular(6, 9, 12),
-    sleepBoutMeanMinutes: rng.triangular(20, 60, 180),
-    movementBoutMeanMinutes: rng.triangular(3, 12, 35),
-    speedMetersPerMinute: rng.triangular(0.4, 1.2, 2.8),
-    socialPropensity: rng.triangular(0.1, 0.45, 0.95),
-    explorationTendency: rng.triangular(0.2, 0.55, 1),
-    nestFidelity: rng.triangular(0.2, 0.7, 1),
-    resourceAttraction: rng.triangular(0.1, 0.45, 0.9)
+    circadianPhaseOffsetHours: sampleTrait(biology.circadianPhaseOffsetHours, rng),
+    dailyActivityMinutes: sampleTrait(biology.dailyActivityMinutes, rng),
+    majorSleepPeriodHours: sampleTrait(biology.majorSleepPeriodHours, rng),
+    sleepBoutMeanMinutes: sampleTrait(biology.sleepBoutMeanMinutes, rng),
+    movementBoutMeanMinutes: sampleTrait(biology.movementBoutMeanMinutes, rng),
+    socialPropensity: sampleTrait(biology.socialPropensity, rng)
   };
 }
 
-function nodeTypeForIndex(index: number, nodeCount: number): PathNode["type"] {
-  if (index < 2) {
-    return "nest";
-  }
-  if (index === nodeCount - 1) {
-    return "resource";
-  }
-  if (index % 7 === 0) {
-    return "feeder";
-  }
+function sampleTrait(
+  distribution: { min: number; mode: number; max: number },
+  rng: SeededRandom
+): number {
+  return rng.triangular(distribution.min, distribution.mode, distribution.max);
+}
+
+function nodeTypeForIndex(_index: number): PathNode["type"] {
   return "junction";
 }
 
@@ -241,16 +251,68 @@ function nearbyPeerScore(node: PathNode, animal: Animal, animals: Animal[]): num
   return Math.min(1, closePeers.length / 3);
 }
 
-export function chooseBehaviorState(timeSeconds: number, animal: Animal, rng: SeededRandom): AnimalState {
-  const hour = ((timeSeconds / 3600 + animal.traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
-  const activeDrive = hour >= 18 || hour <= 6 ? 0.75 : 0.25;
-  const movingChance = activeDrive * (animal.traits.dailyActivityMinutes / 720);
-  const roll = rng.next();
-  if (roll < movingChance) {
+export function chooseBehaviorState(
+  timeSeconds: number,
+  animal: Animal,
+  behavior: BehaviorConfig,
+  rng: SeededRandom
+): AnimalState {
+  return chooseBehaviorStateFromTraits(timeSeconds, animal.traits, behavior, rng);
+}
+
+function chooseBehaviorStateFromTraits(
+  timeSeconds: number,
+  traits: AnimalTraits,
+  behavior: BehaviorConfig,
+  rng: SeededRandom
+): AnimalState {
+  const hour = ((timeSeconds / 3600 + traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
+  const activeCenterHour = behavior.circadianMode === "nocturnal" ? 0 : 12;
+  const sleepCenterHour = behavior.circadianMode === "nocturnal" ? 12 : 0;
+  const activeWindowHours = clamp(traits.dailyActivityMinutes / 60, 1, 16);
+  const activeDrive = windowDrive(hour, activeCenterHour, activeWindowHours);
+  const sleepDrive = windowDrive(hour, sleepCenterHour, traits.majorSleepPeriodHours);
+  const activityIntensity = clamp(traits.dailyActivityMinutes / 720, 0.2, 1);
+  const weights = [
+    0.02 + activeDrive * activityIntensity * 2.2,
+    0.12 + activeDrive * 0.55,
+    0.08 + sleepDrive * 3 + (1 - activeDrive) * 0.8
+  ];
+  const selected = rng.weightedIndex(weights);
+
+  if (selected === 0) {
     return "moving";
   }
-  if (roll < movingChance + 0.2) {
+  if (selected === 1) {
     return "awake_stationary";
   }
   return "sleeping";
+}
+
+function initialBoutRemainingSeconds(state: AnimalState, traits: AnimalTraits, rng: SeededRandom): number {
+  if (state === "moving") {
+    return rng.range(60, Math.max(90, traits.movementBoutMeanMinutes * 60));
+  }
+  if (state === "sleeping") {
+    return rng.range(5 * 60, Math.max(10 * 60, traits.sleepBoutMeanMinutes * 60));
+  }
+  return rng.range(2 * 60, 10 * 60);
+}
+
+function windowDrive(hour: number, centerHour: number, windowHours: number): number {
+  const halfWindow = Math.max(0.5, windowHours / 2);
+  const distance = circularHourDistance(hour, centerHour);
+  if (distance >= halfWindow) {
+    return 0;
+  }
+  return 0.5 + 0.5 * Math.cos((Math.PI * distance) / halfWindow);
+}
+
+function circularHourDistance(left: number, right: number): number {
+  const rawDistance = Math.abs(left - right) % 24;
+  return Math.min(rawDistance, 24 - rawDistance);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

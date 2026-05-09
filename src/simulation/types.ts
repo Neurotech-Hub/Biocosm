@@ -28,11 +28,7 @@ export type AnimalTraits = {
   majorSleepPeriodHours: number;
   sleepBoutMeanMinutes: number;
   movementBoutMeanMinutes: number;
-  speedMetersPerMinute: number;
   socialPropensity: number;
-  explorationTendency: number;
-  nestFidelity: number;
-  resourceAttraction: number;
 };
 
 export type AnimalPosition = {
@@ -56,6 +52,8 @@ export type CollarState = {
   scanIntervalSeconds: number;
   scanWindowSeconds: number;
   advIntervalSeconds: number;
+  scanPhaseOffsetSeconds: number;
+  advPhaseOffsetSeconds: number;
   motionDrive: number;
   peerDrive: number;
   samplingDrive: number;
@@ -71,7 +69,6 @@ export type Animal = {
   position: AnimalPosition;
   collar: CollarState;
   boutRemainingSeconds: number;
-  preferredNestId: string;
   recentNodeIds: string[];
 };
 
@@ -88,6 +85,28 @@ export type BehaviorConfig = {
   socialBoutMeanMinutes: number;
 };
 
+export type TraitDistribution = {
+  min: number;
+  mode: number;
+  max: number;
+};
+
+export type BiologyConfig = {
+  circadianPhaseOffsetHours: TraitDistribution;
+  dailyActivityMinutes: TraitDistribution;
+  majorSleepPeriodHours: TraitDistribution;
+  sleepBoutMeanMinutes: TraitDistribution;
+  movementBoutMeanMinutes: TraitDistribution;
+  socialPropensity: TraitDistribution;
+};
+
+export type MotionSensorConfig = {
+  thresholdMetersPerStep: number;
+  noiseSdMeters: number;
+  falsePositiveRate: number;
+  falseNegativeRate: number;
+};
+
 export type RadioConfig = {
   detectionRadiusMeters: number;
   socialRadiusMeters: number;
@@ -98,24 +117,58 @@ export type RadioConfig = {
   rssiSlope: number;
 };
 
+export type EnergyConfig = {
+  batteryCapacityMah: number;
+  startingVoltage: number;
+  steadyCurrentMa: number;
+  scanCurrentMa: number;
+  advertisingCurrentMa: number;
+};
+
 export type FixedPolicyConfig = {
   id: string;
   type: "fixed";
+  name: string;
   scanIntervalSeconds: number;
   scanWindowSeconds: number;
   advIntervalSeconds: number;
 };
 
+export type MotionPeerAdaptivePolicyConfig = {
+  id: string;
+  type: "motion_peer_adaptive";
+  name: string;
+  scanIntervalMinSeconds: number;
+  scanIntervalMaxSeconds: number;
+  scanWindowMinSeconds: number;
+  scanWindowMaxSeconds: number;
+  advIntervalMinSeconds: number;
+  advIntervalMaxSeconds: number;
+  tauMotionSeconds: number;
+  tauPeerSeconds: number;
+  motionGain: number;
+  peerGain: number;
+  motionWeight: number;
+  peerWeight: number;
+};
+
+export type FirmwarePolicyConfig = FixedPolicyConfig | MotionPeerAdaptivePolicyConfig;
+
 export type SimulationConfig = {
   seed: string;
+  startTimeSeconds: number;
   simulationLengthSeconds: number;
   timeStepSeconds: number;
+  radioStepSeconds: number;
   animalCount: number;
   pathNodeCount: number;
   enclosure: EnclosureConfig;
   behavior: BehaviorConfig;
+  biology: BiologyConfig;
+  motionSensor: MotionSensorConfig;
   radio: RadioConfig;
-  fixedPolicy: FixedPolicyConfig;
+  energy: EnergyConfig;
+  activePolicy: FirmwarePolicyConfig;
 };
 
 export type AnimalObservation = {
@@ -144,6 +197,14 @@ export type DetectionEvent = {
   scanPolicyId: string;
 };
 
+export type BleBurstEvent = {
+  kind: "scan" | "advertise";
+  startTime: number;
+  endTime: number;
+  animalId: string;
+  policyId: string;
+};
+
 export type ScanWindowLog = {
   startTime: number;
   endTime: number;
@@ -151,6 +212,30 @@ export type ScanWindowLog = {
   scanPolicyId: string;
   detectedPeerIds: string[];
   detectedAnyPeer: boolean;
+};
+
+export type ScanWindowEvent = {
+  startTime: number;
+  endTime: number;
+  observerId: string;
+  scanPolicyId: string;
+};
+
+export type AdvertisingEvent = {
+  time: number;
+  animalId: string;
+};
+
+export type EnergyLog = {
+  time: number;
+  steadyMah: number;
+  scanMah: number;
+  advertisingMah: number;
+  totalMah: number;
+  cumulativeMah: number;
+  remainingMah: number;
+  remainingPercent: number;
+  estimatedVoltage: number;
 };
 
 export type AnimalStateLog = {
@@ -190,8 +275,10 @@ export type SimulationLogs = {
   animalStates: AnimalStateLog[];
   trueDyads: TrueDyadLog[];
   detections: DetectionEvent[];
+  bleBursts: BleBurstEvent[];
   scanWindows: ScanWindowLog[];
   collarStates: CollarStateLog[];
+  energy: EnergyLog[];
 };
 
 export type SimulationState = {
@@ -201,7 +288,10 @@ export type SimulationState = {
   animals: Animal[];
   trueContacts: TrueContact[];
   detections: DetectionEvent[];
+  bleBursts: BleBurstEvent[];
   scanWindows: ScanWindowLog[];
+  advertisingEvents: AdvertisingEvent[];
+  energy: EnergyLog;
   logs: SimulationLogs;
   rngState: number;
 };
@@ -213,4 +303,15 @@ export type SimulationMetrics = {
   negativeScanWindows: number;
   uniqueObservedDyads: number;
   recallEstimate: number;
+  bleCaptureRate: number;
+  bleCaptureHits: number;
+  bleCaptureOpportunities: number;
+  scanningAnimals: number;
+  advertisingAnimals: number;
+  meanSamplingDrive: number;
+  meanScanIntervalSeconds: number;
+  energyUsedMah: number;
+  batteryRemainingPercent: number;
+  estimatedVoltage: number;
+  capturePerMah: number;
 };

@@ -1,10 +1,13 @@
-import { computeMetricsFromLogs } from "./analysis";
-import { defaultSimulationConfig } from "./config";
+import { computeMetrics, computeMetricsFromLogs } from "./analysis";
+import { defaultAdaptivePolicy, defaultSimulationConfig } from "./config";
+import { computeEnergyLog, estimateLipoVoltage } from "./energy";
 import { runSimulation, stepSimulation } from "./engine";
-import { computeTrueContacts, simulateBleDetections } from "./radio";
+import { computeMotionObservations } from "./motionSensor";
+import { applyMotionPeerAdaptivePolicy, logInterpolate } from "./policies/adaptive";
+import { createBleBurstEvents, simulateBleDetections } from "./radio";
 import { SeededRandom } from "./random";
 import type { SimulationConfig } from "./types";
-import { createInitialSimulation } from "./world";
+import { chooseBehaviorState, createInitialSimulation } from "./world";
 
 describe("simulation engine", () => {
   it("is deterministic from seed through movement, logs, and detections", () => {
@@ -37,8 +40,10 @@ describe("simulation engine", () => {
         ...defaultSimulationConfig.radio,
         detectionRadiusMeters: 0.01
       },
-      fixedPolicy: {
-        ...defaultSimulationConfig.fixedPolicy,
+      activePolicy: {
+        id: "fixed-rate",
+        type: "fixed",
+        name: "Fixed-rate BLE",
         scanIntervalSeconds: 60,
         scanWindowSeconds: 60,
         advIntervalSeconds: 60
@@ -69,10 +74,19 @@ describe("simulation engine", () => {
         y: 1
       }
     }));
-    const contacts = computeTrueContacts(colocated, config.radio, 60);
+    const contacts = [
+      {
+        time: 60,
+        animalA: "animal-1",
+        animalB: "animal-2",
+        distance: 0.1,
+        withinDetectionRadius: true,
+        withinSocialRadius: true
+      }
+    ];
     const rng = new SeededRandom("radio");
 
-    expect(simulateBleDetections(colocated, contacts, config.radio, "fixed-rate", 60, rng)).toHaveLength(0);
+    expect(simulateBleDetections(colocated, contacts, config.radio, "fixed-rate", 60, rng, [])).toHaveLength(0);
 
     const active = colocated.map((animal) => ({
       ...animal,
@@ -83,7 +97,80 @@ describe("simulation engine", () => {
       }
     }));
 
-    expect(simulateBleDetections(active, contacts, config.radio, "fixed-rate", 60, new SeededRandom("radio"))).toHaveLength(2);
+    expect(
+      simulateBleDetections(
+        active,
+        contacts,
+        config.radio,
+        "fixed-rate",
+        60,
+        new SeededRandom("radio"),
+        [
+          { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
+          { kind: "advertise", startTime: 0, endTime: 2, animalId: "animal-2", policyId: "fixed-rate" },
+          { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-2", policyId: "fixed-rate" },
+          { kind: "advertise", startTime: 0, endTime: 2, animalId: "animal-1", policyId: "fixed-rate" }
+        ]
+      )
+    ).toHaveLength(2);
+  });
+
+  it("uses serial scan priority when scan and advertise are both due", () => {
+    const animal = createInitialSimulation(
+      testConfig({
+        animalCount: 1,
+        activePolicy: {
+          id: "fixed-rate",
+          type: "fixed",
+          name: "Fixed-rate BLE",
+          scanIntervalSeconds: 60,
+          scanWindowSeconds: 60,
+          advIntervalSeconds: 60
+        }
+      })
+    ).animals[0];
+    const dueAnimal = {
+      ...animal,
+      collar: {
+        ...animal.collar,
+        lastScanTime: 0,
+        lastAdvTime: 0
+      }
+    };
+    const bursts = createBleBurstEvents([dueAnimal], "fixed-rate", 60, 120);
+
+    expect(bursts[0].kind).toBe("scan");
+    expect(bursts.every((burst, index) => index === 0 || burst.startTime >= bursts[index - 1].endTime)).toBe(true);
+  });
+
+  it("misses detections when scan and advertising bursts do not overlap", () => {
+    const config = testConfig({
+      animalCount: 2,
+      radio: {
+        ...defaultSimulationConfig.radio,
+        detectionRadiusMeters: 5,
+        rssiThreshold: -200,
+        rssiNoiseSd: 0
+      }
+    });
+    const animals = createInitialSimulation(config).animals;
+    const contacts = [
+      {
+        time: 60,
+        animalA: "animal-1",
+        animalB: "animal-2",
+        distance: 0.1,
+        withinDetectionRadius: true,
+        withinSocialRadius: true
+      }
+    ];
+
+    const detections = simulateBleDetections(animals, contacts, config.radio, "fixed-rate", 60, new SeededRandom("radio"), [
+      { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
+      { kind: "advertise", startTime: 5, endTime: 7, animalId: "animal-2", policyId: "fixed-rate" }
+    ]);
+
+    expect(detections).toHaveLength(0);
   });
 
   it("computes basic true-vs-observed metrics from logs", () => {
@@ -111,6 +198,7 @@ describe("simulation engine", () => {
           scanPolicyId: "fixed-rate"
         }
       ],
+      bleBursts: [],
       scanWindows: [
         {
           startTime: 60,
@@ -120,7 +208,8 @@ describe("simulation engine", () => {
           detectedPeerIds: ["animal-2"],
           detectedAnyPeer: true
         }
-      ]
+      ],
+      energy: []
     });
 
     expect(metrics.trueContactSteps).toBe(1);
@@ -128,9 +217,217 @@ describe("simulation engine", () => {
     expect(metrics.uniqueObservedDyads).toBe(1);
     expect(metrics.recallEstimate).toBe(1);
   });
+
+  it("computes scan and advertising summaries from build-level logs", () => {
+    const state = createInitialSimulation(testConfig({ animalCount: 2 }));
+    const metrics = computeMetrics(state, {
+      ...state.logs,
+      bleBursts: [
+        { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
+        { kind: "advertise", startTime: 0, endTime: 2, animalId: "animal-2", policyId: "fixed-rate" }
+      ]
+    });
+
+    expect(metrics.scanningAnimals).toBe(1);
+    expect(metrics.advertisingAnimals).toBe(1);
+  });
+
+  it("creates deterministic motion sensor observations from seed-controlled noise", () => {
+    const config = testConfig({
+      motionSensor: {
+        thresholdMetersPerStep: 0.05,
+        noiseSdMeters: 0.01,
+        falsePositiveRate: 0,
+        falseNegativeRate: 0
+      }
+    });
+    const previous = createInitialSimulation(config).animals;
+    const moved = previous.map((animal, index) => ({
+      ...animal,
+      position: {
+        ...animal.position,
+        x: animal.position.x + (index === 0 ? 0.2 : 0)
+      }
+    }));
+
+    expect(computeMotionObservations(60, previous, moved, config.motionSensor, new SeededRandom("motion"))).toEqual(
+      computeMotionObservations(60, previous, moved, config.motionSensor, new SeededRandom("motion"))
+    );
+  });
+
+  it("generates deterministic configurable animal traits", () => {
+    const config = testConfig({
+      seed: "biology",
+      animalCount: 4,
+      biology: {
+        dailyActivityMinutes: { min: 240, mode: 300, max: 360 },
+        socialPropensity: { min: 0.2, mode: 0.3, max: 0.4 }
+      }
+    });
+    const left = createInitialSimulation(config).animals.map((animal) => animal.traits);
+    const right = createInitialSimulation(config).animals.map((animal) => animal.traits);
+
+    expect(left).toEqual(right);
+    for (const traits of left) {
+      expect(traits.dailyActivityMinutes).toBeGreaterThanOrEqual(240);
+      expect(traits.dailyActivityMinutes).toBeLessThanOrEqual(360);
+      expect(traits.socialPropensity).toBeGreaterThanOrEqual(0.2);
+      expect(traits.socialPropensity).toBeLessThanOrEqual(0.4);
+      expect("resourceAttraction" in traits).toBe(false);
+      expect("speedMetersPerMinute" in traits).toBe(false);
+    }
+  });
+
+  it("biases nocturnal movement toward the dark phase", () => {
+    const config = testConfig({
+      seed: "circadian",
+      animalCount: 1,
+      behavior: {
+        circadianMode: "nocturnal"
+      },
+      biology: {
+        circadianPhaseOffsetHours: { min: 0, mode: 0, max: 0 },
+        dailyActivityMinutes: { min: 360, mode: 360, max: 360 },
+        majorSleepPeriodHours: { min: 10, mode: 10, max: 10 }
+      }
+    });
+    const animal = createInitialSimulation(config).animals[0];
+    const nightMoving = Array.from({ length: 200 }, (_, index) =>
+      chooseBehaviorState(24 * 3600 + index * 60, animal, config.behavior, new SeededRandom(`night-${index}`))
+    ).filter((state) => state === "moving").length;
+    const dayMoving = Array.from({ length: 200 }, (_, index) =>
+      chooseBehaviorState(12 * 3600 + index * 60, animal, config.behavior, new SeededRandom(`day-${index}`))
+    ).filter((state) => state === "moving").length;
+
+    expect(nightMoving).toBeGreaterThan(dayMoving * 3);
+  });
+
+  it("initializes nocturnal animals from the start-time circadian state", () => {
+    const config = testConfig({
+      seed: "initial-circadian",
+      startTimeSeconds: 12 * 3600,
+      animalCount: 24,
+      behavior: {
+        circadianMode: "nocturnal"
+      },
+      biology: {
+        circadianPhaseOffsetHours: { min: 0, mode: 0, max: 0 },
+        dailyActivityMinutes: { min: 360, mode: 360, max: 360 },
+        majorSleepPeriodHours: { min: 10, mode: 10, max: 10 }
+      }
+    });
+    const initial = createInitialSimulation(config);
+    const movingFraction = initial.animals.filter((animal) => animal.state === "moving").length / config.animalCount;
+
+    expect(movingFraction).toBeLessThan(0.1);
+  });
+
+  it("computes BLE capture rate from in-range dyad intervals", () => {
+    const state = stepSimulation(
+      createInitialSimulation(
+        testConfig({
+          animalCount: 2,
+          radio: {
+            ...defaultSimulationConfig.radio,
+            detectionRadiusMeters: 100,
+            rssiThreshold: -200,
+            rssiNoiseSd: 0
+          },
+          activePolicy: {
+            id: "fixed-rate",
+            type: "fixed",
+            name: "Fixed-rate BLE",
+            scanIntervalSeconds: 60,
+            scanWindowSeconds: 60,
+            advIntervalSeconds: 60
+          }
+        })
+      )
+    );
+    const metrics = computeMetrics(state);
+
+    expect(metrics.bleCaptureOpportunities).toBeGreaterThan(0);
+    expect(metrics.bleCaptureRate).toBeGreaterThanOrEqual(0);
+  });
+
+  it("computes deterministic energy use and LiPo voltage", () => {
+    const energy = computeEnergyLog(
+      60,
+      60,
+      [
+        { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
+        { kind: "advertise", startTime: 2, endTime: 4, animalId: "animal-1", policyId: "fixed-rate" }
+      ],
+      defaultSimulationConfig.energy
+    );
+
+    expect(energy.totalMah).toBeGreaterThan(energy.steadyMah);
+    expect(energy.remainingMah).toBeLessThan(defaultSimulationConfig.energy.batteryCapacityMah);
+    expect(estimateLipoVoltage(1)).toBeGreaterThan(estimateLipoVoltage(0.2));
+  });
+
+  it("maps adaptive drive toward shorter scan intervals", () => {
+    expect(logInterpolate(300, 10, 0)).toBeCloseTo(300);
+    expect(logInterpolate(300, 10, 1)).toBeCloseTo(10);
+    expect(logInterpolate(300, 10, 0.5)).toBeLessThan(300);
+  });
+
+  it("increases adaptive motion and peer drive from observations and recent detections", () => {
+    const config = testConfig({ activePolicy: { ...defaultAdaptivePolicy } });
+    const animal = createInitialSimulation(config).animals[0];
+    const updated = applyMotionPeerAdaptivePolicy(
+      animal,
+      defaultAdaptivePolicy,
+      {
+        time: 60,
+        animalId: animal.id,
+        motionDetected: true,
+        motionMagnitude: 0.2,
+        collarValid: true
+      },
+      [
+        {
+          time: 0,
+          observerId: animal.id,
+          peerId: "animal-2",
+          trueDistance: 0.5,
+          rssi: -60,
+          scanPolicyId: "fixed-rate"
+        }
+      ],
+      60,
+      60
+    );
+
+    expect(updated.collar.motionDrive).toBeGreaterThan(0);
+    expect(updated.collar.peerDrive).toBeGreaterThan(0);
+    expect(updated.collar.scanIntervalSeconds).toBeLessThan(defaultAdaptivePolicy.scanIntervalMaxSeconds);
+  });
+
+  it("changes distance-dependent contacts when physical scale changes", () => {
+    const small = runSimulation(createInitialSimulation(testConfig({ seed: "scale", enclosure: { width: 6, height: 4 } })), 5);
+    const large = runSimulation(createInitialSimulation(testConfig({ seed: "scale", enclosure: { width: 24, height: 14 } })), 5);
+    const smallContacts = small.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius).length;
+    const largeContacts = large.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius).length;
+
+    expect(smallContacts).toBeGreaterThan(largeContacts);
+  });
 });
 
-function testConfig(overrides: Partial<SimulationConfig>): SimulationConfig {
+type TestConfigOverrides = Omit<
+  Partial<SimulationConfig>,
+  "enclosure" | "behavior" | "biology" | "motionSensor" | "radio" | "energy" | "activePolicy"
+> & {
+  enclosure?: Partial<SimulationConfig["enclosure"]>;
+  behavior?: Partial<SimulationConfig["behavior"]>;
+  biology?: Partial<SimulationConfig["biology"]>;
+  motionSensor?: Partial<SimulationConfig["motionSensor"]>;
+  radio?: Partial<SimulationConfig["radio"]>;
+  energy?: Partial<SimulationConfig["energy"]>;
+  activePolicy?: SimulationConfig["activePolicy"];
+};
+
+function testConfig(overrides: TestConfigOverrides): SimulationConfig {
   return {
     ...defaultSimulationConfig,
     ...overrides,
@@ -142,13 +439,22 @@ function testConfig(overrides: Partial<SimulationConfig>): SimulationConfig {
       ...defaultSimulationConfig.behavior,
       ...overrides.behavior
     },
+    biology: {
+      ...defaultSimulationConfig.biology,
+      ...overrides.biology
+    },
+    motionSensor: {
+      ...defaultSimulationConfig.motionSensor,
+      ...overrides.motionSensor
+    },
     radio: {
       ...defaultSimulationConfig.radio,
       ...overrides.radio
     },
-    fixedPolicy: {
-      ...defaultSimulationConfig.fixedPolicy,
-      ...overrides.fixedPolicy
-    }
+    energy: {
+      ...defaultSimulationConfig.energy,
+      ...overrides.energy
+    },
+    activePolicy: overrides.activePolicy ?? defaultSimulationConfig.activePolicy
   };
 }
