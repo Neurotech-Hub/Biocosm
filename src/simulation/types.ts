@@ -1,3 +1,5 @@
+import type { ActivityPattern, AdvancedSpeciesOverrides, SpeciesModifierConfig } from "./speciesTypes";
+
 export type AnimalState = "sleeping" | "awake_stationary" | "moving" | "social_pause";
 
 export type PathNodeType = "junction" | "nest" | "feeder" | "shelter" | "resource";
@@ -23,12 +25,30 @@ export type PathGraph = {
 
 export type AnimalTraits = {
   id: string;
+  speciesPresetId: string;
+  activityPattern: ActivityPattern;
+  activePeakHours: number[];
+  activeWindowHours: number;
+  dailyMotionMinutes: number;
+  majorRestWindowHours: number;
   circadianPhaseOffsetHours: number;
+  groupSynchrony: number;
+  lightPhaseStartHour?: number;
+  lightPhaseEndHour?: number;
+  movementSpeedMetersPerMinute: number;
   dailyActivityMinutes: number;
   majorSleepPeriodHours: number;
   sleepBoutMeanMinutes: number;
   movementBoutMeanMinutes: number;
+  restBoutMeanMinutes: number;
+  stationaryAwakeBoutMeanMinutes: number;
   socialPropensity: number;
+  territoriality: number;
+  seasonalSensitivity: number;
+  sleepArchitecture?: "monophasic" | "polyphasic" | "ultradian";
+  sleepCenterHour?: number;
+  ultradianPeriodMinutes?: number;
+  ultradianAmplitude?: number;
 };
 
 export type AnimalPosition = {
@@ -52,6 +72,8 @@ export type CollarState = {
   scanIntervalSeconds: number;
   scanWindowSeconds: number;
   advIntervalSeconds: number;
+  /** Duration of each advertising burst (seconds). */
+  advertisingBurstDurationSeconds: number;
   scanPhaseOffsetSeconds: number;
   advPhaseOffsetSeconds: number;
   motionDrive: number;
@@ -117,12 +139,32 @@ export type RadioConfig = {
   rssiSlope: number;
 };
 
+/** Matches firmware inter-burst behavior (JUXTA main.c). */
+export type BleSchedulingConfig = {
+  interBurstDelaySeconds: number;
+  randomPostIdleJitterMinSeconds: number;
+  randomPostIdleJitterMaxSeconds: number;
+  /** Half-width of minute-boundary deferrals (seconds from minute start/end to avoid). */
+  minuteWriteSafeZoneSeconds: number;
+  /** Delay after an advertise burst before a scan may start (radio settle time). */
+  scanPreStartRadioStabilizationSeconds: number;
+};
+
 export type EnergyConfig = {
   batteryCapacityMah: number;
   startingVoltage: number;
   steadyCurrentMa: number;
-  scanCurrentMa: number;
-  advertisingCurrentMa: number;
+  /** Assumed TX power for energy priors; RSSI path loss is separate. */
+  txPowerDbm: number;
+  /** Nordic nominal @ +8 dBm, 1M PHY — TX energy uses packet on-air time × this value. */
+  txPeakCurrentMaAtPlus8Dbm: number;
+  /** Nordic nominal RX 1 Mbps — scan energy uses listen-window duration × this value. */
+  rxCurrentMa1MPhy: number;
+  advChannelsPerEvent: number;
+  /** Per-channel on-air time assumed for one advertising PDU (nominal). */
+  txPacketDurationSecondsNominal: number;
+  /** CPU / softdevice overhead while radio is active (burst wall time). */
+  cpuActiveOverheadDuringBleMa: number;
 };
 
 export type FixedPolicyConfig = {
@@ -132,6 +174,8 @@ export type FixedPolicyConfig = {
   scanIntervalSeconds: number;
   scanWindowSeconds: number;
   advIntervalSeconds: number;
+  /** On-air advertising burst length (firmware ADV_BURST_DURATION_MS / 1000). Default 2 s if omitted. */
+  advertisingBurstDurationSeconds?: number;
 };
 
 export type MotionPeerAdaptivePolicyConfig = {
@@ -150,12 +194,16 @@ export type MotionPeerAdaptivePolicyConfig = {
   peerGain: number;
   motionWeight: number;
   peerWeight: number;
+  advertisingBurstDurationSeconds?: number;
 };
 
 export type FirmwarePolicyConfig = FixedPolicyConfig | MotionPeerAdaptivePolicyConfig;
 
 export type SimulationConfig = {
   seed: string;
+  speciesPresetId: string;
+  speciesModifiers: SpeciesModifierConfig;
+  advancedSpeciesOverrides?: AdvancedSpeciesOverrides;
   startTimeSeconds: number;
   simulationLengthSeconds: number;
   timeStepSeconds: number;
@@ -168,6 +216,7 @@ export type SimulationConfig = {
   motionSensor: MotionSensorConfig;
   radio: RadioConfig;
   energy: EnergyConfig;
+  bleScheduling: BleSchedulingConfig;
   activePolicy: FirmwarePolicyConfig;
 };
 
@@ -296,6 +345,13 @@ export type SimulationState = {
   rngState: number;
 };
 
+/** Collapsed like firmware: unique peers per observer per absolute-time minute, max RSSI kept. */
+export type FirmwareMinuteRecord = {
+  minuteBucketStartSeconds: number;
+  observerId: string;
+  detectedPeers: { peerId: string; strongestRssi: number }[];
+};
+
 export type SimulationMetrics = {
   trueContactSteps: number;
   observedDetections: number;
@@ -306,6 +362,8 @@ export type SimulationMetrics = {
   bleCaptureRate: number;
   bleCaptureHits: number;
   bleCaptureOpportunities: number;
+  firmwareMinuteRecords: FirmwareMinuteRecord[];
+  firmwareMinuteObserverSlots: number;
   scanningAnimals: number;
   advertisingAnimals: number;
   meanSamplingDrive: number;

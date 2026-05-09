@@ -1,12 +1,12 @@
 import { edgeLength, edgesForNode, getNode, interpolateEdge, otherNodeId } from "./geometry";
 import { getPolicyTiming } from "./policies/fixedRate";
 import { SeededRandom } from "./random";
+import { resolveSpeciesPreset } from "./speciesModifiers";
 import type {
   Animal,
   AnimalState,
   AnimalTraits,
   BehaviorConfig,
-  BiologyConfig,
   PathEdge,
   PathGraph,
   PathNode,
@@ -107,11 +107,14 @@ export function chooseNextEdge(
     const nextNode = getNode(graph, nextNodeId);
     const novelty = animal.recentNodeIds.includes(nextNodeId) ? 0.3 : 1;
     const peerAttraction = nearbyPeerScore(nextNode, animal, animals);
+    const peerAvoidance = animal.traits.territoriality * peerAttraction * 0.8;
 
-    return (
+    return Math.max(
+      0.05,
       novelty +
       animal.traits.socialPropensity * peerAttraction +
-      0.05
+      0.05 -
+      peerAvoidance
     );
   });
   const selected = candidates[rng.weightedIndex(weights)];
@@ -164,7 +167,7 @@ function createAnimal(
 ): Animal {
   const id = `animal-${index + 1}`;
   const startNode = graph.nodes[index % graph.nodes.length];
-  const traits = createTraits(id, config.biology, rng);
+  const traits = createTraits(id, config, rng);
   const policyTiming = getPolicyTiming(config.activePolicy);
   const scanPhaseOffsetSeconds = rng.range(0, policyTiming.scanIntervalSeconds);
   const advPhaseOffsetSeconds = rng.range(0, policyTiming.advIntervalSeconds);
@@ -192,6 +195,7 @@ function createAnimal(
       scanIntervalSeconds: policyTiming.scanIntervalSeconds,
       scanWindowSeconds: policyTiming.scanWindowSeconds,
       advIntervalSeconds: policyTiming.advIntervalSeconds,
+      advertisingBurstDurationSeconds: policyTiming.advertisingBurstDurationSeconds,
       scanPhaseOffsetSeconds,
       advPhaseOffsetSeconds,
       motionDrive: 0,
@@ -205,15 +209,40 @@ function createAnimal(
   };
 }
 
-export function createTraits(id: string, biology: BiologyConfig, rng: SeededRandom): AnimalTraits {
+export function createTraits(id: string, config: SimulationConfig, rng: SeededRandom): AnimalTraits {
+  const preset = resolveSpeciesPreset(config.speciesPresetId, config.speciesModifiers, config.advancedSpeciesOverrides);
+  const groupSynchrony = preset.groupSynchrony ? sampleTrait(preset.groupSynchrony, rng) : 0;
+  const sampledPhaseOffset = sampleTrait(preset.circadianPhaseOffsetHours, rng) * (1 - groupSynchrony * 0.5);
+  const activeWindowHours = sampleTrait(preset.activeWindowHours, rng);
+  const dailyMotionMinutes = sampleTrait(preset.dailyMotionMinutes, rng);
+  const majorRestWindowHours = sampleTrait(preset.majorRestWindowHours, rng);
+  const restBoutMeanMinutes = sampleTrait(preset.restBoutMeanMinutes, rng);
   return {
     id,
-    circadianPhaseOffsetHours: sampleTrait(biology.circadianPhaseOffsetHours, rng),
-    dailyActivityMinutes: sampleTrait(biology.dailyActivityMinutes, rng),
-    majorSleepPeriodHours: sampleTrait(biology.majorSleepPeriodHours, rng),
-    sleepBoutMeanMinutes: sampleTrait(biology.sleepBoutMeanMinutes, rng),
-    movementBoutMeanMinutes: sampleTrait(biology.movementBoutMeanMinutes, rng),
-    socialPropensity: sampleTrait(biology.socialPropensity, rng)
+    speciesPresetId: preset.id,
+    activityPattern: preset.activityPattern,
+    activePeakHours: preset.activePeakHours,
+    activeWindowHours,
+    dailyMotionMinutes,
+    majorRestWindowHours,
+    circadianPhaseOffsetHours: sampledPhaseOffset,
+    groupSynchrony,
+    lightPhaseStartHour: preset.lightPhaseStartHour,
+    lightPhaseEndHour: preset.lightPhaseEndHour,
+    movementSpeedMetersPerMinute: sampleTrait(preset.movementSpeedMetersPerMinute ?? { min: 0.7, mode: 1.2, max: 2 }, rng),
+    dailyActivityMinutes: dailyMotionMinutes,
+    majorSleepPeriodHours: majorRestWindowHours,
+    sleepBoutMeanMinutes: restBoutMeanMinutes,
+    movementBoutMeanMinutes: sampleTrait(preset.movementBoutMeanMinutes, rng),
+    restBoutMeanMinutes,
+    stationaryAwakeBoutMeanMinutes: sampleTrait(preset.stationaryAwakeBoutMeanMinutes ?? { min: 2, mode: 6, max: 10 }, rng),
+    socialPropensity: sampleTrait(preset.socialPropensity, rng),
+    territoriality: sampleTrait(preset.territoriality, rng),
+    seasonalSensitivity: preset.seasonalSensitivity,
+    sleepArchitecture: preset.sleepArchitecture,
+    sleepCenterHour: preset.sleepCenterHour,
+    ultradianPeriodMinutes: preset.ultradianPeriodMinutes ? sampleTrait(preset.ultradianPeriodMinutes, rng) : undefined,
+    ultradianAmplitude: preset.ultradianAmplitude
   };
 }
 
@@ -267,17 +296,10 @@ function chooseBehaviorStateFromTraits(
   rng: SeededRandom
 ): AnimalState {
   const hour = ((timeSeconds / 3600 + traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
-  const activeCenterHour = behavior.circadianMode === "nocturnal" ? 0 : 12;
-  const sleepCenterHour = behavior.circadianMode === "nocturnal" ? 12 : 0;
-  const activeWindowHours = clamp(traits.dailyActivityMinutes / 60, 1, 16);
-  const activeDrive = windowDrive(hour, activeCenterHour, activeWindowHours);
-  const sleepDrive = windowDrive(hour, sleepCenterHour, traits.majorSleepPeriodHours);
-  const activityIntensity = clamp(traits.dailyActivityMinutes / 720, 0.2, 1);
-  const weights = [
-    0.02 + activeDrive * activityIntensity * 2.2,
-    0.12 + activeDrive * 0.55,
-    0.08 + sleepDrive * 3 + (1 - activeDrive) * 0.8
-  ];
+  const activeDrive = combinedActivityDrive(timeSeconds, hour, traits, behavior);
+  const restDrive = restKernel(hour, traits, behavior);
+  const activityIntensity = clamp(traits.dailyMotionMinutes / 720, 0.15, 1.2);
+  const weights = stateWeightsFromDrive(activeDrive, restDrive, activityIntensity, traits);
   const selected = rng.weightedIndex(weights);
 
   if (selected === 0) {
@@ -287,6 +309,66 @@ function chooseBehaviorStateFromTraits(
     return "awake_stationary";
   }
   return "sleeping";
+}
+
+function combinedActivityDrive(
+  timeSeconds: number,
+  hour: number,
+  traits: AnimalTraits,
+  behavior: BehaviorConfig
+): number {
+  const circadianDrive = circadianKernel(hour, traits, behavior);
+  const ultradianDrive = ultradianKernel(timeSeconds, traits);
+  if (traits.activityPattern === "ultradian") {
+    return clamp(circadianDrive * 0.35 + ultradianDrive * 0.9, 0, 1.4);
+  }
+  if (traits.activityPattern === "crepuscular") {
+    return clamp(circadianDrive * 0.75 + ultradianDrive * 0.35, 0, 1.4);
+  }
+  if (traits.activityPattern === "cathemeral") {
+    return clamp(0.35 + ultradianDrive * 0.45 + circadianDrive * 0.25, 0, 1.4);
+  }
+  return clamp(circadianDrive + ultradianDrive * 0.2, 0, 1.4);
+}
+
+function circadianKernel(hour: number, traits: AnimalTraits, behavior: BehaviorConfig): number {
+  const activeWindowHours = clamp(traits.activeWindowHours, 1, 20);
+  const peaks =
+    traits.activePeakHours.length > 0 ? traits.activePeakHours : [behavior.circadianMode === "nocturnal" ? 0 : 12];
+  return Math.min(1, peaks.reduce((maxDrive, peakHour) => Math.max(maxDrive, windowDrive(hour, peakHour, activeWindowHours)), 0));
+}
+
+function ultradianKernel(timeSeconds: number, traits: AnimalTraits): number {
+  if (!traits.ultradianPeriodMinutes || !traits.ultradianAmplitude) {
+    return 0;
+  }
+  const phase = ((timeSeconds / 60) % traits.ultradianPeriodMinutes) / traits.ultradianPeriodMinutes;
+  const wave = 0.5 + 0.5 * Math.cos(Math.PI * 2 * phase);
+  return wave * traits.ultradianAmplitude;
+}
+
+function restKernel(hour: number, traits: AnimalTraits, behavior: BehaviorConfig): number {
+  if (traits.sleepCenterHour !== undefined) {
+    return windowDrive(hour, traits.sleepCenterHour, traits.majorRestWindowHours);
+  }
+
+  const sleepCenterHour =
+    behavior.circadianMode === "nocturnal" || traits.activityPattern.startsWith("nocturnal") ? 12 : 0;
+  return windowDrive(hour, sleepCenterHour, traits.majorRestWindowHours);
+}
+
+function stateWeightsFromDrive(
+  activeDrive: number,
+  restDrive: number,
+  activityIntensity: number,
+  traits: AnimalTraits
+): [number, number, number] {
+  const synchronyBoost = traits.groupSynchrony * activeDrive * 0.25;
+  return [
+    0.015 + activeDrive * activityIntensity * 2.3 + synchronyBoost,
+    0.12 + activeDrive * 0.6,
+    0.08 + restDrive * 3.2 + Math.max(0, 1 - activeDrive) * 0.75
+  ];
 }
 
 function initialBoutRemainingSeconds(state: AnimalState, traits: AnimalTraits, rng: SeededRandom): number {

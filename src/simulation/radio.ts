@@ -1,26 +1,35 @@
-import { animalDistance } from "./geometry";
+import { animalDistance, interpolatedAnimalDistance } from "./geometry";
 import { SeededRandom } from "./random";
-import type { AdvertisingEvent, Animal, BleBurstEvent, DetectionEvent, RadioConfig, ScanWindowEvent, TrueContact } from "./types";
+import type {
+  AdvertisingEvent,
+  Animal,
+  BleBurstEvent,
+  BleSchedulingConfig,
+  DetectionEvent,
+  EnergyConfig,
+  RadioConfig,
+  ScanWindowEvent,
+  TrueContact
+} from "./types";
 
 export const scanBurstDurationSeconds = 1.5;
-export const advertisingBurstDurationSeconds = 2;
 export const interBurstDelaySeconds = 0.1;
-const scanListenIntervalSeconds = 0.05;
-const scanListenWindowSeconds = 0.0125;
-const advertisingPacketIntervalSeconds = 0.15;
+export const SCAN_LISTEN_INTERVAL_SECONDS = 0.05;
+export const SCAN_LISTEN_WINDOW_SECONDS = 0.0125;
+export const ADVERTISING_PACKET_INTERVAL_SECONDS = 0.15;
 
 export function computeTrueContacts(animals: Animal[], radio: RadioConfig, time: number): TrueContact[] {
   const contacts: TrueContact[] = [];
   for (let left = 0; left < animals.length; left += 1) {
     for (let right = left + 1; right < animals.length; right += 1) {
-      const distance = animalDistance(animals[left], animals[right]);
+      const distanceM = animalDistance(animals[left], animals[right]);
       contacts.push({
         time,
         animalA: animals[left].id,
         animalB: animals[right].id,
-        distance,
-        withinDetectionRadius: distance <= radio.detectionRadiusMeters,
-        withinSocialRadius: distance <= radio.socialRadiusMeters
+        distance: distanceM,
+        withinDetectionRadius: distanceM <= radio.detectionRadiusMeters,
+        withinSocialRadius: distanceM <= radio.socialRadiusMeters
       });
     }
   }
@@ -28,41 +37,84 @@ export function computeTrueContacts(animals: Animal[], radio: RadioConfig, time:
 }
 
 export function simulateBleDetections(
-  animals: Animal[],
-  trueContacts: TrueContact[],
+  animalsStart: Animal[],
+  animalsEnd: Animal[],
   radio: RadioConfig,
   policyId: string,
-  time: number,
+  epochStart: number,
+  epochEnd: number,
   rng: SeededRandom,
   bleBursts?: BleBurstEvent[]
 ): DetectionEvent[] {
-  const animalById = new Map(animals.map((animal) => [animal.id, animal]));
-  const bursts = bleBursts ?? createBleBurstEvents(animals, policyId, time - 60, time);
+  const startById = new Map(animalsStart.map((animal) => [animal.id, animal]));
+  const bursts =
+    bleBursts ?? createBleBurstEvents(animalsEnd, policyId, epochStart, epochEnd, defaultSchedulingFallback());
   const windows = createScanListenWindows(bursts);
   const ads = createAdvertisingEventsFromBursts(bursts);
   const windowsByObserver = groupScanWindowsByObserver(windows);
   const adsByAnimal = groupAdvertisingEventsByAnimal(ads);
   const events: DetectionEvent[] = [];
 
-  for (const contact of trueContacts) {
-    const animalA = animalById.get(contact.animalA);
-    const animalB = animalById.get(contact.animalB);
-    if (!animalA || !animalB || !contact.withinDetectionRadius) {
-      continue;
-    }
+  for (let left = 0; left < animalsEnd.length; left += 1) {
+    for (let right = left + 1; right < animalsEnd.length; right += 1) {
+      const aEnd = animalsEnd[left];
+      const bEnd = animalsEnd[right];
+      const aStart = startById.get(aEnd.id);
+      const bStart = startById.get(bEnd.id);
+      if (!aStart || !bStart || !aEnd.collar.valid || !bEnd.collar.valid) {
+        continue;
+      }
 
-    maybeDetect(animalA, animalB, contact.distance, radio, policyId, rng, windowsByObserver, adsByAnimal, events);
-    maybeDetect(animalB, animalA, contact.distance, radio, policyId, rng, windowsByObserver, adsByAnimal, events);
+      maybeDetectPair(
+        aStart,
+        aEnd,
+        bStart,
+        bEnd,
+        epochStart,
+        epochEnd,
+        radio,
+        policyId,
+        rng,
+        windowsByObserver,
+        adsByAnimal,
+        events
+      );
+      maybeDetectPair(
+        bStart,
+        bEnd,
+        aStart,
+        aEnd,
+        epochStart,
+        epochEnd,
+        radio,
+        policyId,
+        rng,
+        windowsByObserver,
+        adsByAnimal,
+        events
+      );
+    }
   }
 
   return events;
+}
+
+function defaultSchedulingFallback(): BleSchedulingConfig {
+  return {
+    interBurstDelaySeconds: 0.1,
+    randomPostIdleJitterMinSeconds: 0,
+    randomPostIdleJitterMaxSeconds: 1.0,
+    minuteWriteSafeZoneSeconds: 3,
+    scanPreStartRadioStabilizationSeconds: 0.2
+  };
 }
 
 export function createBleBurstEvents(
   animals: Animal[],
   policyId: string,
   epochStart: number,
-  epochEnd: number
+  epochEnd: number,
+  scheduling: BleSchedulingConfig
 ): BleBurstEvent[] {
   return animals.flatMap((animal) => {
     if (!animal.collar.valid) {
@@ -74,6 +126,7 @@ export function createBleBurstEvents(
     let nextScanDue = animal.collar.lastScanTime + animal.collar.scanIntervalSeconds;
     let nextAdvDue = animal.collar.lastAdvTime + animal.collar.advIntervalSeconds;
     let guard = 0;
+    let lastBurstKind: BleBurstEvent["kind"] | null = null;
 
     while (cursor < epochEnd && guard < 1000) {
       guard += 1;
@@ -88,11 +141,37 @@ export function createBleBurstEvents(
 
       const jitteredStart = avoidMinuteSafeZone(
         clampToEpoch(dueAt + deterministicJitter(animal.id, dueAt, kind), epochStart, epochEnd),
-        epochEnd
+        epochEnd,
+        scheduling.minuteWriteSafeZoneSeconds
       );
-      const duration = kind === "scan" ? animal.collar.scanWindowSeconds : advertisingBurstDurationSeconds;
-      const startTime = Math.max(cursor, jitteredStart);
+      const burstAdvSeconds = animal.collar.advertisingBurstDurationSeconds;
+      const duration = kind === "scan" ? animal.collar.scanWindowSeconds : burstAdvSeconds;
+      let startTime = Math.max(cursor, jitteredStart);
+      if (kind === "scan" && lastBurstKind === "advertise") {
+        startTime += scheduling.scanPreStartRadioStabilizationSeconds;
+      }
+      startTime = clampToEpoch(startTime, epochStart, epochEnd);
       const endTime = Math.min(epochEnd, startTime + duration);
+
+      if (endTime <= startTime) {
+        if (kind === "scan") {
+          nextScanDue = endTime + animal.collar.scanIntervalSeconds;
+        } else {
+          nextAdvDue = endTime + animal.collar.advIntervalSeconds;
+        }
+        lastBurstKind = kind;
+        cursor =
+          endTime +
+          scheduling.interBurstDelaySeconds +
+          deterministicPostIdleJitter(
+            animal.id,
+            endTime,
+            kind,
+            scheduling.randomPostIdleJitterMinSeconds,
+            scheduling.randomPostIdleJitterMaxSeconds
+          );
+        continue;
+      }
 
       bursts.push({
         kind,
@@ -107,7 +186,17 @@ export function createBleBurstEvents(
       } else {
         nextAdvDue = endTime + animal.collar.advIntervalSeconds;
       }
-      cursor = endTime + interBurstDelaySeconds + deterministicPositiveJitter(animal.id, endTime, kind);
+      lastBurstKind = kind;
+      cursor =
+        endTime +
+        scheduling.interBurstDelaySeconds +
+        deterministicPostIdleJitter(
+          animal.id,
+          endTime,
+          kind,
+          scheduling.randomPostIdleJitterMinSeconds,
+          scheduling.randomPostIdleJitterMaxSeconds
+        );
     }
 
     return bursts;
@@ -119,20 +208,24 @@ export function createScanWindowEvents(
   policyId: string,
   epochStart: number,
   epochEnd: number,
-  radioStepSeconds = 1
+  radioStepSeconds = 1,
+  scheduling?: BleSchedulingConfig
 ): ScanWindowEvent[] {
   void radioStepSeconds;
-  return createScanWindowEventsFromBursts(createBleBurstEvents(animals, policyId, epochStart, epochEnd));
+  const sched = scheduling ?? defaultSchedulingFallback();
+  return createScanWindowEventsFromBursts(createBleBurstEvents(animals, policyId, epochStart, epochEnd, sched));
 }
 
 export function createAdvertisingEvents(
   animals: Animal[],
   epochStart: number,
   epochEnd: number,
-  radioStepSeconds = 1
+  radioStepSeconds = 1,
+  scheduling?: BleSchedulingConfig
 ): AdvertisingEvent[] {
   void radioStepSeconds;
-  return createAdvertisingEventsFromBursts(createBleBurstEvents(animals, "", epochStart, epochEnd));
+  const sched = scheduling ?? defaultSchedulingFallback();
+  return createAdvertisingEventsFromBursts(createBleBurstEvents(animals, "", epochStart, epochEnd, sched));
 }
 
 export function createScanWindowEventsFromBursts(bursts: BleBurstEvent[]): ScanWindowEvent[] {
@@ -153,11 +246,69 @@ export function createAdvertisingEventsFromBursts(bursts: BleBurstEvent[]): Adve
     }
 
     const packets: AdvertisingEvent[] = [];
-    for (let time = burst.startTime; time <= burst.endTime; time += advertisingPacketIntervalSeconds) {
+    for (let time = burst.startTime; time <= burst.endTime; time += ADVERTISING_PACKET_INTERVAL_SECONDS) {
       packets.push({ time, animalId: burst.animalId });
     }
     return packets;
   });
+}
+
+export function countScanListenWindowsInBursts(bursts: BleBurstEvent[]): number {
+  let count = 0;
+  for (const burst of bursts) {
+    if (burst.kind !== "scan") {
+      continue;
+    }
+    for (let time = burst.startTime; time < burst.endTime; time += SCAN_LISTEN_INTERVAL_SECONDS) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export function totalScanListenWindowSeconds(bursts: BleBurstEvent[]): number {
+  return countScanListenWindowsInBursts(bursts) * SCAN_LISTEN_WINDOW_SECONDS;
+}
+
+export function countAdvertisingPacketsInBursts(bursts: BleBurstEvent[]): number {
+  let count = 0;
+  for (const burst of bursts) {
+    if (burst.kind !== "advertise") {
+      continue;
+    }
+    for (let time = burst.startTime; time <= burst.endTime; time += ADVERTISING_PACKET_INTERVAL_SECONDS) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export function totalBleBurstWallSeconds(bursts: BleBurstEvent[], kind: BleBurstEvent["kind"]): number {
+  return bursts
+    .filter((burst) => burst.kind === kind)
+    .reduce((sum, burst) => sum + Math.max(0, burst.endTime - burst.startTime), 0);
+}
+
+export function estimateEventBasedBleEpochMilliampSeconds(
+  bursts: BleBurstEvent[],
+  epochSeconds: number,
+  config: EnergyConfig
+): { steadyMah: number; scanMah: number; advertisingMah: number } {
+  const steadyMah = config.steadyCurrentMa * (epochSeconds / 3600);
+  const listenSeconds = totalScanListenWindowSeconds(bursts);
+  const scanWallSeconds = totalBleBurstWallSeconds(bursts, "scan");
+  const advWallSeconds = totalBleBurstWallSeconds(bursts, "advertise");
+  const scanRxMah = (listenSeconds * config.rxCurrentMa1MPhy) / 3600;
+  const scanCpuMah = (scanWallSeconds * config.cpuActiveOverheadDuringBleMa) / 3600;
+  const scanMah = scanRxMah + scanCpuMah;
+
+  const advPackets = countAdvertisingPacketsInBursts(bursts);
+  const advTxSeconds = advPackets * config.advChannelsPerEvent * config.txPacketDurationSecondsNominal;
+  const advTxMah = (advTxSeconds * config.txPeakCurrentMaAtPlus8Dbm) / 3600;
+  const advCpuMah = (advWallSeconds * config.cpuActiveOverheadDuringBleMa) / 3600;
+  const advertisingMah = advTxMah + advCpuMah;
+
+  return { steadyMah, scanMah, advertisingMah };
 }
 
 function createScanListenWindows(bursts: BleBurstEvent[]): ScanWindowEvent[] {
@@ -167,10 +318,10 @@ function createScanListenWindows(bursts: BleBurstEvent[]): ScanWindowEvent[] {
     }
 
     const windows: ScanWindowEvent[] = [];
-    for (let time = burst.startTime; time < burst.endTime; time += scanListenIntervalSeconds) {
+    for (let time = burst.startTime; time < burst.endTime; time += SCAN_LISTEN_INTERVAL_SECONDS) {
       windows.push({
         startTime: time,
-        endTime: Math.min(burst.endTime, time + scanListenWindowSeconds),
+        endTime: Math.min(burst.endTime, time + SCAN_LISTEN_WINDOW_SECONDS),
         observerId: burst.animalId,
         scanPolicyId: burst.policyId
       });
@@ -192,10 +343,13 @@ export function detectionProbability(rssi: number, radio: RadioConfig): number {
   return 1 / (1 + Math.exp(-(rssi - radio.rssiThreshold) / radio.rssiSlope));
 }
 
-function maybeDetect(
-  observer: Animal,
-  peer: Animal,
-  distanceMeters: number,
+function maybeDetectPair(
+  observerStart: Animal,
+  observerEnd: Animal,
+  peerStart: Animal,
+  peerEnd: Animal,
+  epochStart: number,
+  epochEnd: number,
   radio: RadioConfig,
   policyId: string,
   rng: SeededRandom,
@@ -203,15 +357,29 @@ function maybeDetect(
   adsByAnimal: Map<string, AdvertisingEvent[]>,
   events: DetectionEvent[]
 ): void {
-  if (!observer.collar.valid || !peer.collar.valid) {
+  if (!observerEnd.collar.valid || !peerEnd.collar.valid) {
     return;
   }
 
-  const windows = windowsByObserver.get(observer.id) ?? [];
-  const ads = adsByAnimal.get(peer.id) ?? [];
+  const windows = windowsByObserver.get(observerEnd.id) ?? [];
+  const ads = adsByAnimal.get(peerEnd.id) ?? [];
+
   for (const window of windows) {
     const matchingAd = ads.find((ad) => ad.time >= window.startTime && ad.time <= window.endTime);
     if (!matchingAd) {
+      continue;
+    }
+
+    const distanceMeters = interpolatedAnimalDistance(
+      observerStart,
+      observerEnd,
+      peerStart,
+      peerEnd,
+      matchingAd.time,
+      epochStart,
+      epochEnd
+    );
+    if (distanceMeters > radio.detectionRadiusMeters) {
       continue;
     }
 
@@ -219,8 +387,8 @@ function maybeDetect(
     if (rng.next() <= detectionProbability(rssi, radio)) {
       events.push({
         time: matchingAd.time,
-        observerId: observer.id,
-        peerId: peer.id,
+        observerId: observerEnd.id,
+        peerId: peerEnd.id,
         trueDistance: distanceMeters,
         rssi,
         scanPolicyId: policyId
@@ -260,17 +428,30 @@ function deterministicJitter(animalId: string, eventTime: number, channel: "scan
   return (hash / 0xffffffff - 0.5) * 1;
 }
 
-function deterministicPositiveJitter(animalId: string, eventTime: number, channel: "scan" | "advertise"): number {
-  return deterministicJitter(animalId, eventTime, channel) + 0.5;
+function deterministicPostIdleJitter(
+  animalId: string,
+  eventTime: number,
+  channel: "scan" | "advertise",
+  minSeconds: number,
+  maxSeconds: number
+): number {
+  let hash = 2166136261;
+  const key = `${animalId}:${Math.round(eventTime * 1000)}:${channel}:post`;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const u = hash / 0xffffffff;
+  return minSeconds + u * Math.max(0, maxSeconds - minSeconds);
 }
 
-function avoidMinuteSafeZone(time: number, epochEnd: number): number {
+function avoidMinuteSafeZone(time: number, epochEnd: number, zoneSeconds: number): number {
   const secondsInMinute = ((time % 60) + 60) % 60;
-  if (secondsInMinute >= 57) {
-    return Math.min(epochEnd, time + (63 - secondsInMinute));
+  if (secondsInMinute >= 60 - zoneSeconds) {
+    return Math.min(epochEnd, time + (60 - secondsInMinute + zoneSeconds));
   }
-  if (secondsInMinute <= 3) {
-    return Math.min(epochEnd, time + (3 - secondsInMinute));
+  if (secondsInMinute <= zoneSeconds) {
+    return Math.min(epochEnd, time + (zoneSeconds - secondsInMinute));
   }
   return time;
 }

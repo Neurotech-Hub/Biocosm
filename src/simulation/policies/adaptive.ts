@@ -1,4 +1,4 @@
-import { applyFixedRatePolicy } from "./fixedRate";
+import { applyFixedRatePolicy, DEFAULT_ADVERTISING_BURST_DURATION_SECONDS } from "./fixedRate";
 import type {
   Animal,
   AnimalObservation,
@@ -47,6 +47,8 @@ export function applyMotionPeerAdaptivePolicy(
     samplingDrive
   );
   const advIntervalSeconds = logInterpolate(policy.advIntervalMaxSeconds, policy.advIntervalMinSeconds, samplingDrive);
+  const advertisingBurstDurationSeconds =
+    policy.advertisingBurstDurationSeconds ?? DEFAULT_ADVERTISING_BURST_DURATION_SECONDS;
 
   return {
     ...animal,
@@ -57,6 +59,7 @@ export function applyMotionPeerAdaptivePolicy(
       scanIntervalSeconds,
       scanWindowSeconds,
       advIntervalSeconds,
+      advertisingBurstDurationSeconds,
       motionDrive,
       peerDrive,
       samplingDrive,

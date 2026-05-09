@@ -1,7 +1,30 @@
-import type { SimulationConfig } from "./types";
+import { DEFAULT_SPECIES_PRESET_ID } from "./speciesPresets";
+import { defaultSpeciesModifiers } from "./speciesModifiers";
+import type { BleSchedulingConfig, FixedPolicyConfig, SimulationConfig } from "./types";
+
+export const defaultBleScheduling: BleSchedulingConfig = {
+  interBurstDelaySeconds: 0.1,
+  randomPostIdleJitterMinSeconds: 0,
+  randomPostIdleJitterMaxSeconds: 1.0,
+  minuteWriteSafeZoneSeconds: 3,
+  scanPreStartRadioStabilizationSeconds: 0.2
+};
+
+/** Matches JUXTA nRF52840 `main.c` operatingMode 0 (non-connectable adv, passive scan). */
+export const juxtaMainCMode0FixedPolicy: FixedPolicyConfig = {
+  id: "juxta-mainc-mode0",
+  type: "fixed",
+  name: "JUXTA main.c mode 0 (5s adv / 20s scan)",
+  scanIntervalSeconds: 20,
+  scanWindowSeconds: 1.5,
+  advIntervalSeconds: 5,
+  advertisingBurstDurationSeconds: 2
+};
 
 export const defaultSimulationConfig: SimulationConfig = {
   seed: "42",
+  speciesPresetId: DEFAULT_SPECIES_PRESET_ID,
+  speciesModifiers: defaultSpeciesModifiers,
   startTimeSeconds: 6 * 60 * 60,
   simulationLengthSeconds: 6 * 60 * 60,
   timeStepSeconds: 60,
@@ -46,17 +69,15 @@ export const defaultSimulationConfig: SimulationConfig = {
     batteryCapacityMah: 100,
     startingVoltage: 4.2,
     steadyCurrentMa: 0.05,
-    scanCurrentMa: 5,
-    advertisingCurrentMa: 5
+    txPowerDbm: 8,
+    txPeakCurrentMaAtPlus8Dbm: 16.4,
+    rxCurrentMa1MPhy: 6.26,
+    advChannelsPerEvent: 3,
+    txPacketDurationSecondsNominal: 0.0015,
+    cpuActiveOverheadDuringBleMa: 1.0
   },
-  activePolicy: {
-    id: "fixed-rate",
-    type: "fixed",
-    name: "Fixed-rate BLE",
-    scanIntervalSeconds: 60,
-    scanWindowSeconds: 1.5,
-    advIntervalSeconds: 30
-  }
+  bleScheduling: { ...defaultBleScheduling },
+  activePolicy: { ...juxtaMainCMode0FixedPolicy }
 };
 
 export const defaultAdaptivePolicy = {
@@ -74,5 +95,6 @@ export const defaultAdaptivePolicy = {
   motionGain: 0.2,
   peerGain: 0.35,
   motionWeight: 0.5,
-  peerWeight: 0.5
+  peerWeight: 0.5,
+  advertisingBurstDurationSeconds: 2
 } as const;

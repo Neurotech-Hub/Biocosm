@@ -74,19 +74,9 @@ describe("simulation engine", () => {
         y: 1
       }
     }));
-    const contacts = [
-      {
-        time: 60,
-        animalA: "animal-1",
-        animalB: "animal-2",
-        distance: 0.1,
-        withinDetectionRadius: true,
-        withinSocialRadius: true
-      }
-    ];
     const rng = new SeededRandom("radio");
 
-    expect(simulateBleDetections(colocated, contacts, config.radio, "fixed-rate", 60, rng, [])).toHaveLength(0);
+    expect(simulateBleDetections(colocated, colocated, config.radio, "fixed-rate", 0, 60, rng, [])).toHaveLength(0);
 
     const active = colocated.map((animal) => ({
       ...animal,
@@ -100,9 +90,10 @@ describe("simulation engine", () => {
     expect(
       simulateBleDetections(
         active,
-        contacts,
+        active,
         config.radio,
         "fixed-rate",
+        0,
         60,
         new SeededRandom("radio"),
         [
@@ -137,7 +128,7 @@ describe("simulation engine", () => {
         lastAdvTime: 0
       }
     };
-    const bursts = createBleBurstEvents([dueAnimal], "fixed-rate", 60, 120);
+    const bursts = createBleBurstEvents([dueAnimal], "fixed-rate", 60, 120, defaultSimulationConfig.bleScheduling);
 
     expect(bursts[0].kind).toBe("scan");
     expect(bursts.every((burst, index) => index === 0 || burst.startTime >= bursts[index - 1].endTime)).toBe(true);
@@ -154,18 +145,8 @@ describe("simulation engine", () => {
       }
     });
     const animals = createInitialSimulation(config).animals;
-    const contacts = [
-      {
-        time: 60,
-        animalA: "animal-1",
-        animalB: "animal-2",
-        distance: 0.1,
-        withinDetectionRadius: true,
-        withinSocialRadius: true
-      }
-    ];
 
-    const detections = simulateBleDetections(animals, contacts, config.radio, "fixed-rate", 60, new SeededRandom("radio"), [
+    const detections = simulateBleDetections(animals, animals, config.radio, "fixed-rate", 0, 60, new SeededRandom("radio"), [
       { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
       { kind: "advertise", startTime: 5, endTime: 7, animalId: "animal-2", policyId: "fixed-rate" }
     ]);
@@ -259,8 +240,8 @@ describe("simulation engine", () => {
     const config = testConfig({
       seed: "biology",
       animalCount: 4,
-      biology: {
-        dailyActivityMinutes: { min: 240, mode: 300, max: 360 },
+      advancedSpeciesOverrides: {
+        dailyMotionMinutes: { min: 240, mode: 300, max: 360 },
         socialPropensity: { min: 0.2, mode: 0.3, max: 0.4 }
       }
     });
@@ -269,8 +250,8 @@ describe("simulation engine", () => {
 
     expect(left).toEqual(right);
     for (const traits of left) {
-      expect(traits.dailyActivityMinutes).toBeGreaterThanOrEqual(240);
-      expect(traits.dailyActivityMinutes).toBeLessThanOrEqual(360);
+      expect(traits.dailyMotionMinutes).toBeGreaterThanOrEqual(240);
+      expect(traits.dailyMotionMinutes).toBeLessThanOrEqual(360);
       expect(traits.socialPropensity).toBeGreaterThanOrEqual(0.2);
       expect(traits.socialPropensity).toBeLessThanOrEqual(0.4);
       expect("resourceAttraction" in traits).toBe(false);
@@ -282,13 +263,11 @@ describe("simulation engine", () => {
     const config = testConfig({
       seed: "circadian",
       animalCount: 1,
-      behavior: {
-        circadianMode: "nocturnal"
-      },
-      biology: {
+      speciesPresetId: "lab_mouse",
+      advancedSpeciesOverrides: {
         circadianPhaseOffsetHours: { min: 0, mode: 0, max: 0 },
-        dailyActivityMinutes: { min: 360, mode: 360, max: 360 },
-        majorSleepPeriodHours: { min: 10, mode: 10, max: 10 }
+        dailyMotionMinutes: { min: 360, mode: 360, max: 360 },
+        majorRestWindowHours: { min: 10, mode: 10, max: 10 }
       }
     });
     const animal = createInitialSimulation(config).animals[0];
@@ -307,13 +286,11 @@ describe("simulation engine", () => {
       seed: "initial-circadian",
       startTimeSeconds: 12 * 3600,
       animalCount: 24,
-      behavior: {
-        circadianMode: "nocturnal"
-      },
-      biology: {
+      speciesPresetId: "lab_mouse",
+      advancedSpeciesOverrides: {
         circadianPhaseOffsetHours: { min: 0, mode: 0, max: 0 },
-        dailyActivityMinutes: { min: 360, mode: 360, max: 360 },
-        majorSleepPeriodHours: { min: 10, mode: 10, max: 10 }
+        dailyMotionMinutes: { min: 360, mode: 360, max: 360 },
+        majorRestWindowHours: { min: 10, mode: 10, max: 10 }
       }
     });
     const initial = createInitialSimulation(config);
@@ -416,7 +393,7 @@ describe("simulation engine", () => {
 
 type TestConfigOverrides = Omit<
   Partial<SimulationConfig>,
-  "enclosure" | "behavior" | "biology" | "motionSensor" | "radio" | "energy" | "activePolicy"
+  "enclosure" | "behavior" | "biology" | "motionSensor" | "radio" | "energy" | "bleScheduling" | "activePolicy" | "speciesModifiers"
 > & {
   enclosure?: Partial<SimulationConfig["enclosure"]>;
   behavior?: Partial<SimulationConfig["behavior"]>;
@@ -424,6 +401,8 @@ type TestConfigOverrides = Omit<
   motionSensor?: Partial<SimulationConfig["motionSensor"]>;
   radio?: Partial<SimulationConfig["radio"]>;
   energy?: Partial<SimulationConfig["energy"]>;
+  bleScheduling?: Partial<SimulationConfig["bleScheduling"]>;
+  speciesModifiers?: Partial<SimulationConfig["speciesModifiers"]>;
   activePolicy?: SimulationConfig["activePolicy"];
 };
 
@@ -443,6 +422,10 @@ function testConfig(overrides: TestConfigOverrides): SimulationConfig {
       ...defaultSimulationConfig.biology,
       ...overrides.biology
     },
+    speciesModifiers: {
+      ...defaultSimulationConfig.speciesModifiers,
+      ...overrides.speciesModifiers
+    },
     motionSensor: {
       ...defaultSimulationConfig.motionSensor,
       ...overrides.motionSensor
@@ -454,6 +437,10 @@ function testConfig(overrides: TestConfigOverrides): SimulationConfig {
     energy: {
       ...defaultSimulationConfig.energy,
       ...overrides.energy
+    },
+    bleScheduling: {
+      ...defaultSimulationConfig.bleScheduling,
+      ...overrides.bleScheduling
     },
     activePolicy: overrides.activePolicy ?? defaultSimulationConfig.activePolicy
   };

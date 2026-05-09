@@ -10,7 +10,7 @@ export function LegendPanel() {
         <LegendItem label="Observed BLE detection" sample={<span className="legend-line observed-line" />} />
         <LegendItem label="Scan found peer" sample={<span className="legend-ring scan-summary-ring" />} />
         <LegendItem label="Advertisement detected" sample={<span className="legend-dot advertising-summary-dot" />} />
-        <LegendItem label="Path node" sample={<span className="legend-dot path-node-dot" />} />
+        <LegendItem label="Path node" sample={<span className="path-node-diamond" />} />
         <LegendItem label="Moving animal" sample={<span className="legend-dot moving-dot" />} />
         <LegendItem label="Sleeping animal" sample={<span className="legend-dot sleeping-dot" />} />
         <LegendItem label="Stationary animal" sample={<span className="legend-dot stationary-dot" />} />

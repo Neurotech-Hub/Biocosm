@@ -70,8 +70,8 @@ function drawSimulation(
   if (showObservedDetections) {
     drawDetections(context, state, projection);
   }
-  drawSamplingIndicators(context, state, projection);
   drawAnimals(context, state, projection);
+  drawSamplingIndicators(context, state, projection);
 }
 
 function drawPathGraph(
@@ -97,10 +97,18 @@ function drawPathGraph(
 
   for (const node of state.pathGraph.nodes) {
     const point = projection.toScreen(node.x, node.y);
+    const radius = projection.nodeRadius;
+    context.save();
+    context.translate(point.x, point.y);
+    context.rotate(Math.PI / 4);
     context.beginPath();
-    context.fillStyle = "#8ba4b8";
-    context.arc(point.x, point.y, projection.nodeRadius, 0, Math.PI * 2);
+    context.fillStyle = "#a78bfa";
+    context.strokeStyle = "#2e1065";
+    context.lineWidth = Math.max(1, projection.pathWidth * 0.8);
+    context.rect(-radius, -radius, radius * 2, radius * 2);
     context.fill();
+    context.stroke();
+    context.restore();
   }
 }
 
@@ -160,8 +168,10 @@ function drawAnimals(context: CanvasRenderingContext2D, state: SimulationState, 
 
     context.beginPath();
     context.fillStyle = animal.state === "sleeping" ? "#66717d" : animal.state === "moving" ? "#72e6ac" : "#f0f6fc";
+    context.globalAlpha = 0.72;
     context.arc(point.x, point.y, animalRadius, 0, Math.PI * 2);
     context.fill();
+    context.globalAlpha = 1;
 
     context.fillStyle = "#d6e2ef";
     context.font = `${projection.labelFontSize}px system-ui`;
@@ -189,15 +199,10 @@ function drawSamplingIndicators(
 
     if (detectedAdvertiserIds.has(animal.id)) {
       context.beginPath();
-      context.fillStyle = "rgba(250, 204, 21, 0.9)";
-      context.arc(
-        point.x - projection.animalRadius * 0.75,
-        point.y + projection.animalRadius * 0.75,
-        projection.advertisingDotRadius,
-        0,
-        Math.PI * 2
-      );
-      context.fill();
+      context.strokeStyle = "rgba(250, 204, 21, 0.95)";
+      context.lineWidth = projection.samplingIndicatorWidth * 1.25;
+      context.arc(point.x, point.y, projection.animalRadius + 9 * projection.samplingVisualScale, 0, Math.PI * 2);
+      context.stroke();
     }
   }
 }
@@ -217,7 +222,6 @@ type Projection = {
   labelFontSize: number;
   samplingIndicatorWidth: number;
   samplingVisualScale: number;
-  advertisingDotRadius: number;
 };
 
 function createProjection(state: SimulationState): Projection {
@@ -248,8 +252,7 @@ function createProjection(state: SimulationState): Projection {
     scaleBarWidth: 1.3 * visualScale,
     labelFontSize: Math.round(8 * visualScale),
     samplingIndicatorWidth: 1 * visualScale,
-    samplingVisualScale: visualScale,
-    advertisingDotRadius: 2.1 * visualScale
+    samplingVisualScale: visualScale
   };
 }
 

@@ -1,8 +1,44 @@
 import { pairKey } from "./geometry";
-import type { SimulationLogs, SimulationMetrics, SimulationState } from "./types";
+import type { DetectionEvent, FirmwareMinuteRecord, SimulationLogs, SimulationMetrics, SimulationState } from "./types";
+
+export function buildFirmwareMinuteRecords(
+  detections: DetectionEvent[],
+  startTimeSeconds: number
+): FirmwareMinuteRecord[] {
+  type Row = { minuteBucketStartSeconds: number; observerId: string; peers: Map<string, number> };
+  const rows = new Map<string, Row>();
+
+  for (const event of detections) {
+    const absoluteSeconds = startTimeSeconds + event.time;
+    const minuteBucketStartSeconds = Math.floor(absoluteSeconds / 60) * 60;
+    const key = `${minuteBucketStartSeconds}|${event.observerId}`;
+    let row = rows.get(key);
+    if (!row) {
+      row = { minuteBucketStartSeconds, observerId: event.observerId, peers: new Map() };
+      rows.set(key, row);
+    }
+    const prev = row.peers.get(event.peerId);
+    if (prev === undefined || event.rssi > prev) {
+      row.peers.set(event.peerId, event.rssi);
+    }
+  }
+
+  const records: FirmwareMinuteRecord[] = [...rows.values()].map((row) => ({
+    minuteBucketStartSeconds: row.minuteBucketStartSeconds,
+    observerId: row.observerId,
+    detectedPeers: [...row.peers.entries()].map(([peerId, strongestRssi]) => ({ peerId, strongestRssi }))
+  }));
+
+  records.sort(
+    (a, b) =>
+      a.minuteBucketStartSeconds - b.minuteBucketStartSeconds ||
+      a.observerId.localeCompare(b.observerId)
+  );
+  return records;
+}
 
 export function computeMetrics(state: SimulationState, logs: SimulationLogs = state.logs): SimulationMetrics {
-  const logMetrics = computeMetricsFromLogs(logs);
+  const logMetrics = computeMetricsFromLogs(logs, state.config.startTimeSeconds);
   const animalCount = Math.max(1, state.animals.length);
   const capture = computeBleCapture(state, logs);
   const latestEnergy = logs.energy.at(-1) ?? state.energy;
@@ -23,10 +59,18 @@ export function computeMetrics(state: SimulationState, logs: SimulationLogs = st
   };
 }
 
-export function computeMetricsFromLogs(logs: SimulationLogs): SimulationMetrics {
+export function computeMetricsFromLogs(
+  logs: SimulationLogs,
+  startTimeSecondsForMinuteRecords = 0
+): SimulationMetrics {
   const trueContactSteps = logs.trueDyads.filter((dyad) => dyad.withinSocialRadius && dyad.bothCollarsValid).length;
   const observedDyads = new Set(logs.detections.map((event) => pairKey(event.observerId, event.peerId)));
   const trueDetectionOpportunities = logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius && dyad.bothCollarsValid).length;
+  const firmwareMinuteRecords = buildFirmwareMinuteRecords(logs.detections, startTimeSecondsForMinuteRecords);
+  const firmwareMinuteObserverSlots = firmwareMinuteRecords.reduce(
+    (sum, record) => sum + record.detectedPeers.length,
+    0
+  );
 
   return {
     trueContactSteps,
@@ -38,6 +82,8 @@ export function computeMetricsFromLogs(logs: SimulationLogs): SimulationMetrics 
     bleCaptureRate: 0,
     bleCaptureHits: 0,
     bleCaptureOpportunities: 0,
+    firmwareMinuteRecords,
+    firmwareMinuteObserverSlots,
     scanningAnimals: 0,
     advertisingAnimals: 0,
     meanSamplingDrive: 0,

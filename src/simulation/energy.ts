@@ -1,3 +1,9 @@
+import {
+  countAdvertisingPacketsInBursts,
+  countScanListenWindowsInBursts,
+  estimateEventBasedBleEpochMilliampSeconds,
+  totalBleBurstWallSeconds
+} from "./radio";
 import type { BleBurstEvent, EnergyConfig, EnergyLog } from "./types";
 
 export function computeEnergyLog(
@@ -7,11 +13,11 @@ export function computeEnergyLog(
   config: EnergyConfig,
   previousCumulativeMah = 0
 ): EnergyLog {
-  const scanSeconds = burstSeconds(bursts, "scan");
-  const advertisingSeconds = burstSeconds(bursts, "advertise");
-  const steadyMah = config.steadyCurrentMa * (epochSeconds / 3600);
-  const scanMah = config.scanCurrentMa * (scanSeconds / 3600);
-  const advertisingMah = config.advertisingCurrentMa * (advertisingSeconds / 3600);
+  const { steadyMah, scanMah, advertisingMah } = estimateEventBasedBleEpochMilliampSeconds(
+    bursts,
+    epochSeconds,
+    config
+  );
   const totalMah = steadyMah + scanMah + advertisingMah;
   const cumulativeMah = previousCumulativeMah + totalMah;
   const remainingMah = Math.max(0, config.batteryCapacityMah - cumulativeMah);
@@ -27,6 +33,21 @@ export function computeEnergyLog(
     remainingMah,
     remainingPercent,
     estimatedVoltage: estimateLipoVoltage(remainingPercent, config.startingVoltage)
+  };
+}
+
+/** Exported for tests comparing scheduling across epoch lengths. */
+export function energyDiagnostics(bursts: BleBurstEvent[]): {
+  scanListenWindowCount: number;
+  advertisingPacketCount: number;
+  scanBurstWallSeconds: number;
+  advertisingBurstWallSeconds: number;
+} {
+  return {
+    scanListenWindowCount: countScanListenWindowsInBursts(bursts),
+    advertisingPacketCount: countAdvertisingPacketsInBursts(bursts),
+    scanBurstWallSeconds: totalBleBurstWallSeconds(bursts, "scan"),
+    advertisingBurstWallSeconds: totalBleBurstWallSeconds(bursts, "advertise")
   };
 }
 
@@ -50,10 +71,4 @@ export function estimateLipoVoltage(stateOfCharge: number, startingVoltage = 4.2
   }
 
   return curve.at(-1)?.voltage ?? startingVoltage;
-}
-
-function burstSeconds(bursts: BleBurstEvent[], kind: BleBurstEvent["kind"]): number {
-  return bursts
-    .filter((burst) => burst.kind === kind)
-    .reduce((sum, burst) => sum + Math.max(0, burst.endTime - burst.startTime), 0);
 }

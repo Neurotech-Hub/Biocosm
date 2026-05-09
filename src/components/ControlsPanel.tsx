@@ -1,10 +1,28 @@
-import { defaultAdaptivePolicy } from "../simulation/config";
+import { useState } from "react";
+import { defaultAdaptivePolicy, juxtaMainCMode0FixedPolicy } from "../simulation/config";
+import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
+import { SPECIES_PRESETS, speciesPresetOptions } from "../simulation/speciesPresets";
+import type { SpeciesModifierConfig, SpeciesPreset } from "../simulation/speciesTypes";
 import type {
   FixedPolicyConfig,
   MotionPeerAdaptivePolicyConfig,
   SimulationConfig,
   TraitDistribution
 } from "../simulation/types";
+
+type DistributionOverrideKey =
+  | "activeWindowHours"
+  | "dailyMotionMinutes"
+  | "majorRestWindowHours"
+  | "movementBoutMeanMinutes"
+  | "restBoutMeanMinutes"
+  | "stationaryAwakeBoutMeanMinutes"
+  | "movementSpeedMetersPerMinute"
+  | "circadianPhaseOffsetHours"
+  | "socialPropensity"
+  | "territoriality"
+  | "groupSynchrony"
+  | "ultradianPeriodMinutes";
 
 type ControlsPanelProps = {
   config: SimulationConfig;
@@ -46,21 +64,38 @@ export function ControlsPanel({
   onShowTrueProximityChange,
   onShowObservedDetectionsChange
 }: ControlsPanelProps) {
+  const [isAdvancedSpeciesOpen, setIsAdvancedSpeciesOpen] = useState(false);
   const fixedPolicy: FixedPolicyConfig | undefined =
     config.activePolicy.type === "fixed" ? config.activePolicy : undefined;
   const adaptivePolicy: MotionPeerAdaptivePolicyConfig | undefined =
     config.activePolicy.type === "motion_peer_adaptive" ? config.activePolicy : undefined;
-  const updateBiologyDistribution = (
-    traitKey: keyof SimulationConfig["biology"],
+  const selectedPreset = (SPECIES_PRESETS[config.speciesPresetId as keyof typeof SPECIES_PRESETS] ??
+    SPECIES_PRESETS.lab_mouse) as SpeciesPreset;
+  const effectivePreset = resolveSpeciesPreset(config.speciesPresetId, config.speciesModifiers, config.advancedSpeciesOverrides);
+  const updateSpeciesModifier = (field: keyof SpeciesModifierConfig, value: number) => {
+    onConfigChange({
+      ...config,
+      speciesModifiers: {
+        ...config.speciesModifiers,
+        [field]: value
+      }
+    });
+  };
+  const updateSpeciesDistributionOverride = (
+    traitKey: DistributionOverrideKey,
     field: keyof TraitDistribution,
     value: number
   ) => {
+    const currentDistribution = config.advancedSpeciesOverrides?.[traitKey] ?? selectedPreset[traitKey];
+    if (!currentDistribution || typeof currentDistribution === "number" || Array.isArray(currentDistribution)) {
+      return;
+    }
     onConfigChange({
       ...config,
-      biology: {
-        ...config.biology,
+      advancedSpeciesOverrides: {
+        ...config.advancedSpeciesOverrides,
         [traitKey]: {
-          ...config.biology[traitKey],
+          ...currentDistribution,
           [field]: value
         }
       }
@@ -260,8 +295,8 @@ export function ControlsPanel({
       <section className="control-section">
         <h3>Device / BLE</h3>
         <p className="helper-text">
-          BLE capture rate is the primary policy-quality metric: detected in-range dyad intervals divided by true
-          in-range dyad intervals.
+          BLE capture rate uses simulated in-range dyad intervals at each frame (60s by default) compared to raw detection
+          events; firmware-shaped unique peers per minute (max RSSI) are listed separately in metrics.
         </p>
 
         <label>
@@ -275,17 +310,9 @@ export function ControlsPanel({
                 activePolicy:
                   nextType === "motion_peer_adaptive"
                     ? { ...defaultAdaptivePolicy }
-                    : {
-                        id: "fixed-rate",
-                        type: "fixed",
-                        name: "Fixed-rate BLE",
-                        scanIntervalSeconds:
-                          config.activePolicy.type === "fixed" ? config.activePolicy.scanIntervalSeconds : 60,
-                        scanWindowSeconds:
-                          config.activePolicy.type === "fixed" ? config.activePolicy.scanWindowSeconds : 1.5,
-                        advIntervalSeconds:
-                          config.activePolicy.type === "fixed" ? config.activePolicy.advIntervalSeconds : 30
-                      }
+                    : config.activePolicy.type === "fixed"
+                      ? config.activePolicy
+                      : { ...juxtaMainCMode0FixedPolicy }
               });
             }}
           >
@@ -383,6 +410,26 @@ export function ControlsPanel({
               }
             />
           </label>
+
+          <label>
+            Advertise burst duration: {(fixedPolicy.advertisingBurstDurationSeconds ?? 2).toFixed(1)}s
+            <input
+              type="range"
+              min="0.5"
+              max="5"
+              step="0.5"
+              value={fixedPolicy.advertisingBurstDurationSeconds ?? 2}
+              onChange={(event) =>
+                onConfigChange({
+                  ...config,
+                  activePolicy: {
+                    ...fixedPolicy,
+                    advertisingBurstDurationSeconds: Number(event.target.value)
+                  }
+                })
+              }
+            />
+          </label>
         </>
         ) : adaptivePolicy ? (
         <details className="advanced-controls">
@@ -446,58 +493,179 @@ export function ControlsPanel({
       <section className="control-section">
         <h3>Animal / Biology</h3>
         <label>
-          Circadian mode
+          Species preset
           <select
-            value={config.behavior.circadianMode}
+            value={config.speciesPresetId}
             onChange={(event) =>
               onConfigChange({
                 ...config,
-                behavior: {
-                  ...config.behavior,
-                  circadianMode: event.target.value as SimulationConfig["behavior"]["circadianMode"]
-                }
+                speciesPresetId: event.target.value,
+                advancedSpeciesOverrides: undefined
               })
             }
           >
-            <option value="nocturnal">Nocturnal</option>
-            <option value="diurnal">Diurnal</option>
+            {speciesPresetOptions.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
           </select>
         </label>
-        <p className="helper-text">
-          Trait rows use min / peak / max triangular distributions. These settings are sampled once per animal when a
-          simulation is built.
-        </p>
-        <TraitDistributionControl
-          label="Daily activity minutes"
-          distribution={config.biology.dailyActivityMinutes}
-          step={10}
-          onChange={(field, value) => updateBiologyDistribution("dailyActivityMinutes", field, value)}
-        />
-        <TraitDistributionControl
-          label="Sleep bout minutes"
-          distribution={config.biology.sleepBoutMeanMinutes}
-          step={5}
-          onChange={(field, value) => updateBiologyDistribution("sleepBoutMeanMinutes", field, value)}
-        />
-        <TraitDistributionControl
-          label="Movement bout minutes"
-          distribution={config.biology.movementBoutMeanMinutes}
-          step={1}
-          onChange={(field, value) => updateBiologyDistribution("movementBoutMeanMinutes", field, value)}
-        />
-        <TraitDistributionControl
-          label="Social propensity"
-          distribution={config.biology.socialPropensity}
-          step={0.05}
-          onChange={(field, value) => updateBiologyDistribution("socialPropensity", field, value)}
-        />
+        <div className="preset-summary">
+          <span>Pattern: {effectivePreset.activityPattern.replaceAll("_", " ")}</span>
+          <span>Peaks: {effectivePreset.activePeakHours.map(formatHour).join(", ")}</span>
+          <span>Motion: {formatDistribution(effectivePreset.dailyMotionMinutes)} min/day</span>
+          <span>Sociality: {effectivePreset.socialPropensity.mode.toFixed(2)}</span>
+          <span>Territoriality: {effectivePreset.territoriality.mode.toFixed(2)}</span>
+          <span>Confidence: {effectivePreset.confidence}</span>
+        </div>
+        <p className="helper-text">{effectivePreset.notes}</p>
+        <label>
+          Activity modifier: {config.speciesModifiers.activityLevelMultiplier.toFixed(2)}x
+          <input
+            type="range"
+            min="0.25"
+            max="2"
+            step="0.05"
+            value={config.speciesModifiers.activityLevelMultiplier}
+            onChange={(event) => updateSpeciesModifier("activityLevelMultiplier", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Sociality modifier: {config.speciesModifiers.socialityMultiplier.toFixed(2)}x
+          <input
+            type="range"
+            min="0.25"
+            max="2"
+            step="0.05"
+            value={config.speciesModifiers.socialityMultiplier}
+            onChange={(event) => updateSpeciesModifier("socialityMultiplier", Number(event.target.value))}
+          />
+        </label>
+        <button type="button" className="secondary-button" onClick={() => setIsAdvancedSpeciesOpen(true)}>
+          Advanced Species Parameters
+        </button>
+        {isAdvancedSpeciesOpen ? (
+          <div className="modal-backdrop" role="presentation">
+            <div className="species-modal" role="dialog" aria-modal="true" aria-labelledby="species-modal-title">
+              <div className="modal-header">
+                <h3 id="species-modal-title">Advanced Species Parameters</h3>
+                <button type="button" className="secondary-button" onClick={() => setIsAdvancedSpeciesOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <p className="helper-text">
+                These overrides modify the selected species prior. Values remain min / peak / max triangular distributions
+                and are sampled once per animal at build time.
+              </p>
+              <div className="advanced-species-grid">
+                <TraitDistributionControl
+                  label="Active window hours"
+                  distribution={effectivePreset.activeWindowHours}
+                  step={0.5}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("activeWindowHours", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Daily motion minutes"
+                  distribution={effectivePreset.dailyMotionMinutes}
+                  step={10}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("dailyMotionMinutes", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Major rest window hours"
+                  distribution={effectivePreset.majorRestWindowHours}
+                  step={0.5}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("majorRestWindowHours", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Movement bout minutes"
+                  distribution={effectivePreset.movementBoutMeanMinutes}
+                  step={1}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("movementBoutMeanMinutes", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Rest bout minutes"
+                  distribution={effectivePreset.restBoutMeanMinutes}
+                  step={5}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("restBoutMeanMinutes", field, value)}
+                />
+                {effectivePreset.stationaryAwakeBoutMeanMinutes ? (
+                  <TraitDistributionControl
+                    label="Awake stationary bout minutes"
+                    distribution={effectivePreset.stationaryAwakeBoutMeanMinutes}
+                    step={5}
+                    onChange={(field, value) =>
+                      updateSpeciesDistributionOverride("stationaryAwakeBoutMeanMinutes", field, value)
+                    }
+                  />
+                ) : null}
+                <TraitDistributionControl
+                  label="Phase offset hours"
+                  distribution={effectivePreset.circadianPhaseOffsetHours}
+                  step={0.5}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("circadianPhaseOffsetHours", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Social propensity"
+                  distribution={effectivePreset.socialPropensity}
+                  step={0.05}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("socialPropensity", field, value)}
+                />
+                <TraitDistributionControl
+                  label="Territoriality"
+                  distribution={effectivePreset.territoriality}
+                  step={0.05}
+                  onChange={(field, value) => updateSpeciesDistributionOverride("territoriality", field, value)}
+                />
+                {effectivePreset.groupSynchrony ? (
+                  <TraitDistributionControl
+                    label="Group synchrony"
+                    distribution={effectivePreset.groupSynchrony}
+                    step={0.05}
+                    onChange={(field, value) => updateSpeciesDistributionOverride("groupSynchrony", field, value)}
+                  />
+                ) : null}
+                {effectivePreset.movementSpeedMetersPerMinute ? (
+                  <TraitDistributionControl
+                    label="Movement speed m/min"
+                    distribution={effectivePreset.movementSpeedMetersPerMinute}
+                    step={1}
+                    onChange={(field, value) =>
+                      updateSpeciesDistributionOverride("movementSpeedMetersPerMinute", field, value)
+                    }
+                  />
+                ) : null}
+                {effectivePreset.ultradianPeriodMinutes ? (
+                  <TraitDistributionControl
+                    label="Ultradian period minutes"
+                    distribution={effectivePreset.ultradianPeriodMinutes}
+                    step={10}
+                    onChange={(field, value) => updateSpeciesDistributionOverride("ultradianPeriodMinutes", field, value)}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="control-section">
         <h3>Energy / Battery</h3>
         <p className="helper-text">
-          Simple LiPo budget using nRF52840-like BLE burst currents plus steady 50 uA peripheral/sleep draw by default.
+          BLE draw uses RX only during scan listen windows and TX only for synthetic advertising packets (three nominal
+          channels × per-channel on-air time), plus CPU overhead over burst wall clock, at Nordic-style nominal mA.
         </p>
+        <label>
+          Assumed TX power (energy prior): {config.energy.txPowerDbm} dBm
+          <input
+            type="range"
+            min="-4"
+            max="8"
+            step="1"
+            value={config.energy.txPowerDbm}
+            onChange={(event) => updateEnergyConfig("txPowerDbm", Number(event.target.value))}
+          />
+        </label>
         <label>
           Battery capacity: {config.energy.batteryCapacityMah} mAh
           <input
@@ -529,28 +697,6 @@ export function ControlsPanel({
             step="10"
             value={config.energy.steadyCurrentMa * 1000}
             onChange={(event) => updateEnergyConfig("steadyCurrentMa", Number(event.target.value) / 1000)}
-          />
-        </label>
-        <label>
-          Scan current: {config.energy.scanCurrentMa.toFixed(1)} mA
-          <input
-            type="range"
-            min="1"
-            max="15"
-            step="0.5"
-            value={config.energy.scanCurrentMa}
-            onChange={(event) => updateEnergyConfig("scanCurrentMa", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Advertising current: {config.energy.advertisingCurrentMa.toFixed(1)} mA
-          <input
-            type="range"
-            min="1"
-            max="15"
-            step="0.5"
-            value={config.energy.advertisingCurrentMa}
-            onChange={(event) => updateEnergyConfig("advertisingCurrentMa", Number(event.target.value))}
           />
         </label>
       </section>
@@ -600,6 +746,14 @@ function TraitDistributionControl({ label, distribution, step, onChange }: Trait
       </div>
     </div>
   );
+}
+
+function formatDistribution(distribution: TraitDistribution): string {
+  return `${distribution.min}-${distribution.mode}-${distribution.max}`;
+}
+
+function formatHour(hour: number): string {
+  return `${Math.floor(hour).toString().padStart(2, "0")}:00`;
 }
 
 const sizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);

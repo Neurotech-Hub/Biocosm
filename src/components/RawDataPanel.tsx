@@ -1,11 +1,15 @@
-import type { SimulationConfig, SimulationLogs } from "../simulation/types";
+import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
+import type { SimulationConfig, SimulationLogs, SimulationState } from "../simulation/types";
 
 type RawDataPanelProps = {
   logs: SimulationLogs;
   config: SimulationConfig;
+  timeline?: SimulationState[];
 };
 
-export function RawDataPanel({ logs, config }: RawDataPanelProps) {
+export function RawDataPanel({ logs, config, timeline = [] }: RawDataPanelProps) {
+  const speciesPreset = resolveSpeciesPreset(config.speciesPresetId, config.speciesModifiers, config.advancedSpeciesOverrides);
+  const sampledAnimalTraits = timeline[0]?.animals.map((animal) => animal.traits) ?? [];
   return (
     <section className="panel raw-data-panel">
       <h2>Raw Data Export</h2>
@@ -20,7 +24,12 @@ export function RawDataPanel({ logs, config }: RawDataPanelProps) {
         <span>{logs.bleBursts.length.toLocaleString()} BLE burst rows</span>
       </div>
       <div className="button-row">
-        <button type="button" onClick={() => downloadJson("biocosm-raw-logs.json", { config, logs })}>
+        <button
+          type="button"
+          onClick={() =>
+            downloadJson("biocosm-raw-logs.json", { config, speciesPreset, sampledAnimalTraits, logs })
+          }
+        >
           Export JSON
         </button>
         <button type="button" onClick={() => downloadCsvBundle(logs)}>

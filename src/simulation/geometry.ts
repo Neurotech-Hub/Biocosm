@@ -48,3 +48,24 @@ export function pairKey(a: string, b: string): string {
 export function animalDistance(a: Animal, b: Animal): number {
   return distance(a.position, b.position);
 }
+
+/** Linear interpolation of positions between epoch start/end snapshots (constant-velocity segment). */
+export function interpolatedAnimalDistance(
+  observerStart: Animal,
+  observerEnd: Animal,
+  peerStart: Animal,
+  peerEnd: Animal,
+  timeSeconds: number,
+  epochStart: number,
+  epochEnd: number
+): number {
+  if (epochEnd <= epochStart) {
+    return distance(observerEnd.position, peerEnd.position);
+  }
+  const u = Math.max(0, Math.min(1, (timeSeconds - epochStart) / (epochEnd - epochStart)));
+  const ox = observerStart.position.x + (observerEnd.position.x - observerStart.position.x) * u;
+  const oy = observerStart.position.y + (observerEnd.position.y - observerStart.position.y) * u;
+  const px = peerStart.position.x + (peerEnd.position.x - peerStart.position.x) * u;
+  const py = peerStart.position.y + (peerEnd.position.y - peerStart.position.y) * u;
+  return Math.hypot(ox - px, oy - py);
+}

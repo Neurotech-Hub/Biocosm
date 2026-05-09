@@ -2,6 +2,8 @@
 
 This document describes the current circadian model used by the Adaptive Social Proximity Logger Simulator. It is intended for biological review and highlights the code locations, parameters, and assumptions that currently shape animal activity.
 
+Update: biology is now species-preset driven. `src/simulation/speciesPresets.ts` defines priors for rodents, squirrels, and humans; `src/simulation/speciesModifiers.ts` applies global sensitivity modifiers; `src/simulation/world.ts` samples per-animal traits from the effective preset and uses activity-pattern kernels for nocturnal, diurnal, bimodal, crepuscular, ultradian, and cathemeral behavior.
+
 ## Associated Code
 
 - `src/simulation/types.ts`

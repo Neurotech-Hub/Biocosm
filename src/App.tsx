@@ -82,7 +82,7 @@ export function App() {
           <TimeSeriesPanel points={build.timeSeries} energy={build.logs.energy} currentStep={currentStep} />
           <LegendPanel />
           <MetricsPanel metrics={build.metrics} animalCount={builtConfig.animalCount} />
-          <RawDataPanel logs={build.logs} config={builtConfig} />
+          <RawDataPanel logs={build.logs} config={builtConfig} timeline={build.timeline} />
           <AssumptionsPanel config={builtConfig} />
         </div>
         <ControlsPanel

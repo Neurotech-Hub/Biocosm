@@ -25,14 +25,13 @@ import type {
   TrueDyadLog
 } from "./types";
 
-const movementSpeedMetersPerMinute = 1.2;
-
 export function stepSimulation(state: SimulationState): SimulationState {
   const rng = SeededRandom.fromState(state.rngState);
   const dtSeconds = state.config.timeStepSeconds;
   const time = state.time + dtSeconds;
   const absoluteTime = state.config.startTimeSeconds + time;
 
+  const animalsAtEpochStart = state.animals;
   const movedAnimals = updateAnimalPositions(state.animals, state, absoluteTime, dtSeconds, rng);
   const observations = computeMotionObservations(time, state.animals, movedAnimals, state.config.motionSensor, rng);
   const observationByAnimal = new Map(observations.map((observation) => [observation.animalId, observation]));
@@ -57,17 +56,19 @@ export function stepSimulation(state: SimulationState): SimulationState {
     animalsWithPolicy,
     state.config.activePolicy.id,
     epochStart,
-    time
+    time,
+    state.config.bleScheduling
   );
   const animalsWithBurstState = applyBurstState(animalsWithPolicy, bleBursts);
   const trueContacts = computeTrueContacts(animalsWithBurstState, state.config.radio, time);
   const scanWindowEvents = createScanWindowEventsFromBursts(bleBursts);
   const advertisingEvents = createAdvertisingEventsFromBursts(bleBursts);
   const detections = simulateBleDetections(
+    animalsAtEpochStart,
     animalsWithBurstState,
-    trueContacts,
     state.config.radio,
     state.config.activePolicy.id,
+    epochStart,
     time,
     rng,
     bleBursts
@@ -177,7 +178,7 @@ function updateAnimalPositions(
     }
 
     const edge = getEdge(state.pathGraph, nextAnimal.position.edgeId ?? "");
-    const distanceThisStep = movementSpeedMetersPerMinute * (dtSeconds / 60);
+    const distanceThisStep = nextAnimal.traits.movementSpeedMetersPerMinute * (dtSeconds / 60);
     const progressDelta = edge.length > 0 ? distanceThisStep / edge.length : 1;
     const progress = Math.min(1, nextAnimal.position.progress + progressDelta);
     const point = interpolateEdge(state.pathGraph, nextAnimal.position.fromNodeId, nextAnimal.position.toNodeId, progress);
@@ -204,9 +205,9 @@ function boutLengthSeconds(state: Animal["state"], animal: Animal, rng: SeededRa
     return Math.max(60, rng.triangular(60, animal.traits.movementBoutMeanMinutes * 60, animal.traits.movementBoutMeanMinutes * 180));
   }
   if (state === "sleeping") {
-    return Math.max(120, rng.triangular(120, animal.traits.sleepBoutMeanMinutes * 60, animal.traits.sleepBoutMeanMinutes * 180));
+    return Math.max(120, rng.triangular(120, animal.traits.restBoutMeanMinutes * 60, animal.traits.restBoutMeanMinutes * 180));
   }
-  return rng.range(2 * 60, 10 * 60);
+  return Math.max(60, rng.triangular(60, animal.traits.stationaryAwakeBoutMeanMinutes * 60, animal.traits.stationaryAwakeBoutMeanMinutes * 180));
 }
 
 function createScanWindowLogs(scanWindowEvents: ScanWindowEvent[], detections: DetectionEvent[]): ScanWindowLog[] {
