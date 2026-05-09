@@ -1,0 +1,160 @@
+:root {
+  color: #e7eef6;
+  background: #0b1118;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1100px;
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  background: #2f80ed;
+  color: white;
+  cursor: pointer;
+  padding: 0.65rem 0.9rem;
+}
+
+button:hover {
+  background: #4492fb;
+}
+
+.app-shell {
+  padding: 24px;
+}
+
+.app-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.app-header h1 {
+  font-size: 1.55rem;
+  margin: 0 0 0.25rem;
+}
+
+.app-header p {
+  color: #9fb1c2;
+  margin: 0;
+}
+
+.header-pill {
+  background: #172333;
+  border: 1px solid #26394e;
+  border-radius: 999px;
+  color: #bdd2e6;
+  padding: 0.5rem 0.85rem;
+}
+
+.workspace {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(760px, 1fr) 340px;
+}
+
+.visual-column {
+  display: grid;
+  gap: 18px;
+}
+
+.sim-canvas,
+.panel {
+  background: #121b26;
+  border: 1px solid #243549;
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+.sim-canvas {
+  display: block;
+  width: 100%;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel h2 {
+  font-size: 1rem;
+  margin: 0 0 1rem;
+}
+
+.controls-panel {
+  align-self: start;
+  display: grid;
+  gap: 14px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+}
+
+label {
+  color: #b7c8d8;
+  display: grid;
+  font-size: 0.92rem;
+  gap: 7px;
+}
+
+input:not([type="checkbox"]) {
+  background: #0c141d;
+  border: 1px solid #2e4358;
+  border-radius: 9px;
+  color: #e7eef6;
+  padding: 0.55rem 0.65rem;
+  width: 100%;
+}
+
+input[type="range"] {
+  padding: 0;
+}
+
+.checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.metric-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric-card {
+  background: #0d1620;
+  border: 1px solid #223245;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.metric-card span {
+  color: #90a4b8;
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+
+.metric-card strong {
+  color: #ffffff;
+  font-size: 1.25rem;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "biocosm",
+  "version": "1.0.0",
+  "description": "Browser-based adaptive social proximity logger simulator.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "^24.1.3",
+    "typescript": "^6.0.3",
+    "vite": "^5.4.21",
+    "vitest": "^1.6.1"
+  }
+}
