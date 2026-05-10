@@ -1,8 +1,8 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { InfoPopover } from "./InfoPopover";
 import type { SimulationConfig } from "../simulation/types";
 import type { CandidatePick, SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
-import type { SweepResultBundle } from "../simulation/sweep/adaptiveBleSweep";
+import type { SweepRawRow, SweepResultBundle } from "../simulation/sweep/adaptiveBleSweep";
 import {
   buildSweepMarkdownReport,
   serializeSweepRawCsv,
@@ -19,16 +19,249 @@ function policyHoverLabel(summary: SweepPolicySummary): string {
   return `${summary.policyId} — ${summary.label}`;
 }
 
-function efficiencyRowStyle(eff: number, minEff: number, maxEff: number): CSSProperties {
-  if (!Number.isFinite(eff)) {
-    return {};
+function nearlyEqual(a: number, b: number, eps = 1e-5): boolean {
+  return Math.abs(a - b) < eps;
+}
+
+/** True when the built Simulator policy matches this sweep row’s swept parameters. */
+function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: SimulationConfig): boolean {
+  if (!summary.params) {
+    return false;
   }
-  if (maxEff <= minEff || Math.abs(maxEff - minEff) < 1e-12) {
+  const active = config.activePolicy;
+  if (summary.params.family === "adaptive" && active.type === "motion_peer_adaptive") {
+    const p = summary.params;
+    return (
+      nearlyEqual(p.baselineDrive, active.baselineDrive) &&
+      nearlyEqual(p.motionWeight, active.motionWeight) &&
+      nearlyEqual(p.peerWeight, active.peerWeight) &&
+      p.tauPeerSeconds === active.tauPeerSeconds
+    );
+  }
+  if (summary.params.family === "fixed" && active.type === "fixed") {
+    const p = summary.params;
+    return (
+      nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
+      nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
+      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds)
+    );
+  }
+  return false;
+}
+
+/** Axis explanations — plain language for sweep chart popovers. */
+const SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY = (
+  <dl className="metric-definition-list">
+    <dt>Across (horizontal)</dt>
+    <dd>
+      Estimated BLE energy for one collar over a full day, in milliamp-hours (mAh/day). Reading further <strong>right</strong>{" "}
+      means higher average draw for that policy.
+    </dd>
+    <dt>Up (vertical)</dt>
+    <dd>
+      BLE <strong>capture rate</strong>: fraction of social-contact opportunities where the simulated collar logged at least one
+      detection. Higher is better capture performance (0 = none, 1 = every opportunity).
+    </dd>
+  </dl>
+);
+
+function algBadge(summary: SweepPolicySummary): { letter: string; title: string; className: string } {
+  if (summary.isJuxtaReference || summary.kind === "baseline_fixed") {
+    return { letter: "J", title: "Juxta 5.6 reference (fixed)", className: "sweep-alg sweep-alg-juxta" };
+  }
+  if (summary.kind === "fixed_sweep") {
+    return { letter: "F", title: "Fixed-rate BLE", className: "sweep-alg sweep-alg-fixed" };
+  }
+  return { letter: "A", title: "Adaptive BLE", className: "sweep-alg sweep-alg-adaptive" };
+}
+
+type ScatterPoint = {
+  x: number;
+  y: number;
+  id: string;
+  tooltip: string;
+  variant: "adaptive" | "fixed_sweep";
+  highlight: boolean;
+  /** Non-dominated on mean capture vs mean mAh/day (same as summary CSV). */
+  pareto: boolean;
+};
+
+/** Columns that get red→yellow→green tint (Alg / Policy stay plain). */
+const SWEEP_METRIC_COLUMNS = [
+  "rank",
+  "bd",
+  "mw",
+  "pw",
+  "tauPeer",
+  "scanInt",
+  "scanWin",
+  "advInt",
+  "capture",
+  "mAh",
+  "efficiency",
+  "relCap",
+  "relE",
+  "meanDrive",
+  "pctBelow",
+  "pctNear",
+  "pctAbove"
+] as const;
+
+type SweepMetricColumn = (typeof SWEEP_METRIC_COLUMNS)[number];
+
+const SWEEP_COLUMN_SENTIMENT: Record<SweepMetricColumn, "higherBetter" | "lowerBetter"> = {
+  rank: "lowerBetter",
+  bd: "higherBetter",
+  mw: "higherBetter",
+  pw: "higherBetter",
+  tauPeer: "higherBetter",
+  scanInt: "higherBetter",
+  scanWin: "higherBetter",
+  advInt: "higherBetter",
+  capture: "higherBetter",
+  mAh: "lowerBetter",
+  efficiency: "higherBetter",
+  relCap: "higherBetter",
+  relE: "lowerBetter",
+  meanDrive: "higherBetter",
+  pctBelow: "higherBetter",
+  pctNear: "higherBetter",
+  pctAbove: "higherBetter"
+};
+
+function sweepRowDerivedMetrics(summary: SweepPolicySummary, rawRows: SweepRawRow[]) {
+  const samples = rawRows.filter((row) => row.policyId === summary.policyId);
+  const avgNullable = (pick: (row: SweepRawRow) => number | null) => {
+    const values = samples.map(pick).filter((value): value is number => value != null);
+    if (values.length === 0) {
+      return null;
+    }
+    return values.reduce((accumulator, value) => accumulator + value, 0) / values.length;
+  };
+  return {
+    meanDrive: avgNullable((row) => row.meanSamplingDrive),
+    pctBelow: avgNullable((row) => row.percentTimeBelowFixed),
+    pctNear: avgNullable((row) => row.percentTimeNearFixed),
+    pctAbove: avgNullable((row) => row.percentTimeAboveFixed)
+  };
+}
+
+function extractSweepMetricValue(
+  summary: SweepPolicySummary,
+  rank: number | null,
+  column: SweepMetricColumn,
+  rawRows: SweepRawRow[]
+): number | null {
+  if (column === "rank") {
+    return rank;
+  }
+  const p = summary.params;
+  if (column === "bd") {
+    return p?.family === "adaptive" ? p.baselineDrive : null;
+  }
+  if (column === "mw") {
+    return p?.family === "adaptive" ? p.motionWeight : null;
+  }
+  if (column === "pw") {
+    return p?.family === "adaptive" ? p.peerWeight : null;
+  }
+  if (column === "tauPeer") {
+    return p?.family === "adaptive" ? p.tauPeerSeconds : null;
+  }
+  if (column === "scanInt") {
+    return p?.family === "fixed" ? p.scanIntervalSeconds : null;
+  }
+  if (column === "scanWin") {
+    return p?.family === "fixed" ? p.scanWindowSeconds : null;
+  }
+  if (column === "advInt") {
+    return p?.family === "fixed" ? p.advIntervalSeconds : null;
+  }
+  if (column === "capture") {
+    return summary.meanCaptureRate;
+  }
+  if (column === "mAh") {
+    return summary.meanMahPerDay;
+  }
+  if (column === "efficiency") {
+    return summary.meanBleEfficiency;
+  }
+  if (column === "relCap") {
+    return summary.meanRelativeCapture;
+  }
+  if (column === "relE") {
+    return summary.meanRelativeEnergy;
+  }
+  const derived = sweepRowDerivedMetrics(summary, rawRows);
+  if (column === "meanDrive") {
+    return derived.meanDrive;
+  }
+  if (column === "pctBelow") {
+    return derived.pctBelow;
+  }
+  if (column === "pctNear") {
+    return derived.pctNear;
+  }
+  if (column === "pctAbove") {
+    return derived.pctAbove;
+  }
+  return null;
+}
+
+function buildSweepColumnRanges(
+  rows: Array<{ summary: SweepPolicySummary; rank: number | null }>,
+  rawRows: SweepRawRow[]
+): Record<SweepMetricColumn, { min: number; max: number } | null> {
+  const ranges = {} as Record<SweepMetricColumn, { min: number; max: number } | null>;
+  for (const column of SWEEP_METRIC_COLUMNS) {
+    const values: number[] = [];
+    for (const { summary, rank } of rows) {
+      const v = extractSweepMetricValue(summary, rank, column, rawRows);
+      if (v != null && Number.isFinite(v)) {
+        values.push(v);
+      }
+    }
+    ranges[column] =
+      values.length === 0 ? null : { min: Math.min(...values), max: Math.max(...values) };
+  }
+  return ranges;
+}
+
+function sweepMetricCellBackground(
+  value: number | null,
+  min: number,
+  max: number,
+  sentiment: "higherBetter" | "lowerBetter"
+): CSSProperties {
+  if (value == null || !Number.isFinite(value)) {
+    return { backgroundColor: "hsla(40, 30%, 16%, 0.5)" };
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min || Math.abs(max - min) < 1e-12) {
     return { backgroundColor: "hsla(52, 50%, 16%, 0.65)" };
   }
-  const t = Math.max(0, Math.min(1, (eff - minEff) / (maxEff - minEff)));
+  const tRaw =
+    sentiment === "higherBetter" ? (value - min) / (max - min) : (max - value) / (max - min);
+  const t = Math.max(0, Math.min(1, tRaw));
   const hue = t * 120;
   return { backgroundColor: `hsla(${hue}, 50%, 15%, 0.68)` };
+}
+
+function metricStylesForRow(
+  summary: SweepPolicySummary,
+  rank: number | null,
+  rawRows: SweepRawRow[],
+  ranges: Record<SweepMetricColumn, { min: number; max: number } | null>
+): Record<SweepMetricColumn, CSSProperties> {
+  const styles = {} as Record<SweepMetricColumn, CSSProperties>;
+  for (const column of SWEEP_METRIC_COLUMNS) {
+    const v = extractSweepMetricValue(summary, rank, column, rawRows);
+    const span = ranges[column];
+    styles[column] =
+      span == null
+        ? sweepMetricCellBackground(null, 0, 1, "higherBetter")
+        : sweepMetricCellBackground(v, span.min, span.max, SWEEP_COLUMN_SENTIMENT[column]);
+  }
+  return styles;
 }
 
 type SweepReportPanelProps = {
@@ -44,6 +277,17 @@ export function SweepReportPanel({
   onSimulatePolicy,
   simulateDisabled = false
 }: SweepReportPanelProps) {
+  /** Baseline + all policies, sorted by mean BLE efficiency (table and summary CSV). */
+  const tableRowsRanked = useMemo(() => {
+    if (!sweepResult) {
+      return [];
+    }
+    return [sweepResult.baselineSummary, ...sweepResult.summaries].sort(
+      (a, b) => b.meanBleEfficiency - a.meanBleEfficiency
+    );
+  }, [sweepResult]);
+
+  /** Sweep summaries only (plots keep a separate dashed Juxta reference point). */
   const summariesByEfficiency = useMemo(() => {
     if (!sweepResult) {
       return [];
@@ -51,15 +295,37 @@ export function SweepReportPanel({
     return [...sweepResult.summaries].sort((a, b) => b.meanBleEfficiency - a.meanBleEfficiency);
   }, [sweepResult]);
 
-  const rankedIds = useMemo(() => summariesByEfficiency.map((summary) => summary.policyId), [summariesByEfficiency]);
-
-  const efficiencyRange = useMemo(() => {
-    if (summariesByEfficiency.length === 0) {
-      return { min: 0, max: 1 };
+  const sweepTableMetricStyles = useMemo(() => {
+    if (!sweepResult) {
+      return null;
     }
-    const effs = summariesByEfficiency.map((row) => row.meanBleEfficiency);
-    return { min: Math.min(...effs), max: Math.max(...effs) };
-  }, [summariesByEfficiency]);
+    const rows = tableRowsRanked.map((summary, index) => ({
+      summary,
+      rank: index + 1
+    }));
+    const ranges = buildSweepColumnRanges(rows, sweepResult.rawRows);
+    const byPolicy = new Map<string, Record<SweepMetricColumn, CSSProperties>>();
+    for (let index = 0; index < tableRowsRanked.length; index++) {
+      const summary = tableRowsRanked[index]!;
+      byPolicy.set(
+        summary.policyId,
+        metricStylesForRow(summary, index + 1, sweepResult.rawRows, ranges)
+      );
+    }
+    return { byPolicy };
+  }, [sweepResult, tableRowsRanked]);
+
+  const captureVsEnergyPoints = useMemo((): ScatterPoint[] => {
+    return summariesByEfficiency.map((summary) => ({
+      x: summary.meanMahPerDay,
+      y: summary.meanCaptureRate,
+      id: summary.policyId,
+      tooltip: policyHoverLabel(summary),
+      variant: summary.kind === "adaptive" ? "adaptive" : "fixed_sweep",
+      highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
+      pareto: summary.isParetoEfficient
+    }));
+  }, [summariesByEfficiency, baseConfig]);
 
   const downloadRawCsv = () => {
     if (!sweepResult) {
@@ -78,7 +344,7 @@ export function SweepReportPanel({
     }
     downloadBlob(
       `biocosm-sweep-summary-${baseConfig.seed}.csv`,
-      serializeSweepSummaryCsv(sweepResult, rankedIds),
+      serializeSweepSummaryCsv(sweepResult),
       "text/csv;charset=utf-8"
     );
   };
@@ -99,7 +365,7 @@ export function SweepReportPanel({
   };
 
   const hasResult = Boolean(sweepResult);
-  const sweepTableColSpan = 15;
+  const sweepTableColSpan = 20;
 
   return (
     <div className="sweep-report-panel">
@@ -109,65 +375,33 @@ export function SweepReportPanel({
         <SweepRecommendationsPlaceholder />
       )}
 
-      <div className="sweep-plots-grid">
+      <div className="sweep-plots-grid sweep-plots-grid--single">
         {sweepResult ? (
-          <>
-            <SweepScatterPlot
-              title="Capture rate vs energy"
-              subtitle="Upper-left is better capture at lower energy."
-              xLabel="mAh/day"
-              yLabel="BLE capture rate"
-              baselinePoint={{
-                x: sweepResult.baselineSummary.meanMahPerDay,
-                y: sweepResult.baselineSummary.meanCaptureRate,
-                label: "Fixed Juxta baseline",
-                tooltip: `Fixed Juxta baseline (${sweepResult.baselineSummary.policyId}) — fixed-rate BLE schedule used as sweep reference`
-              }}
-              points={summariesByEfficiency.map((summary) => ({
-                x: summary.meanMahPerDay,
-                y: summary.meanCaptureRate,
-                id: summary.policyId,
-                tooltip: policyHoverLabel(summary)
-              }))}
-            />
-            <SweepScatterPlot
-              title="BLE efficiency vs capture rate"
-              subtitle="Upper-right: high capture and high capture per energy."
-              xLabel="BLE capture rate"
-              yLabel="Efficiency (rate / mAh·day⁻¹)"
-              baselinePoint={{
-                x: sweepResult.baselineSummary.meanCaptureRate,
-                y: sweepResult.baselineSummary.meanBleEfficiency,
-                label: "Fixed Juxta baseline",
-                tooltip: `Fixed Juxta baseline (${sweepResult.baselineSummary.policyId}) — fixed-rate BLE schedule used as sweep reference`
-              }}
-              points={summariesByEfficiency.map((summary) => ({
-                x: summary.meanCaptureRate,
-                y: summary.meanBleEfficiency,
-                id: summary.policyId,
-                tooltip: policyHoverLabel(summary)
-              }))}
-            />
-            <SweepRelativeTradeoffPlot summaries={summariesByEfficiency} />
-          </>
+          <SweepScatterPlot
+            axesPopoverTitle="Capture rate vs energy — axes"
+            axesPopoverChildren={SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY}
+            title="Capture rate vs energy"
+            subtitle="Upper-left is better capture at lower energy (same layout as the Optimizer analysis chart)."
+            xLabel="mAh/day"
+            yLabel="BLE capture rate"
+            baselinePoint={{
+              x: sweepResult.baselineSummary.meanMahPerDay,
+              y: sweepResult.baselineSummary.meanCaptureRate,
+              label: "Juxta 5.6",
+              tooltip: `Juxta 5.6 reference (${sweepResult.baselineSummary.policyId}) — 20s scan interval / 1.5s scan window / 5s advertise interval; dashed ring distinguishes reference among yellow fixed-rate points`,
+              pareto: sweepResult.baselineSummary.isParetoEfficient
+            }}
+            baselineMatchesBuilt={sweepSummaryMatchesBuilt(sweepResult.baselineSummary, baseConfig)}
+            points={captureVsEnergyPoints}
+          />
         ) : (
-          <>
-            <SweepPlotPlaceholder
-              title="Capture rate vs energy"
-              subtitle="Upper-left is better capture at lower energy."
-              hint="Legend: gold = Fixed Juxta baseline; cyan = adaptive sweep points. Hover any circle for policy id and swept parameters."
-            />
-            <SweepPlotPlaceholder
-              title="BLE efficiency vs capture rate"
-              subtitle="Upper-right: high capture and high capture per energy."
-              hint="Same legend and hover behavior as the capture vs energy chart."
-            />
-            <SweepPlotPlaceholder
-              title="Relative capture vs relative energy"
-              subtitle="Reference lines at fixed-rate energy (x=1) and capture (y=1)."
-              hint="Hover cyan points for adaptive policy id and parameters; baseline is relative (1, 1)."
-            />
-          </>
+          <SweepPlotPlaceholder
+            axesPopoverTitle="Capture rate vs energy — axes"
+            axesPopoverChildren={SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY}
+            title="Capture rate vs energy"
+            subtitle="Upper-left is better capture at lower energy."
+            hint="Hover points after a sweep for policy id. Legend below shows marker meanings."
+          />
         )}
       </div>
 
@@ -177,42 +411,50 @@ export function SweepReportPanel({
           <InfoPopover label="Explain candidate table columns" title="Candidate table columns">
             <dl className="metric-definition-list">
               <dt>Rank</dt>
-              <dd>Order by mean BLE efficiency among adaptive candidates in this sweep (1 = highest efficiency).</dd>
-              <dt>Row tint</dt>
+              <dd>Order by mean BLE efficiency across every policy in the sweep, including Juxta 5.6 (1 = highest).</dd>
+              <dt>Alg</dt>
               <dd>
-                Adaptive rows use a red→yellow→green background by mean efficiency within this sweep only (green = higher
-                efficiency). The Fixed Juxta row keeps a fixed highlight style.
+                <strong>J</strong> = Juxta 5.6 reference (fixed), <strong>F</strong> = other fixed-rate schedule,{" "}
+                <strong>A</strong> = adaptive.
               </dd>
-                  <dt>Policy</dt>
-                  <dd>
-                    Simulator-generated id for this adaptive parameter cell (truncated). Hover for full id and parameter
-                    summary. Use <strong>Simulate</strong> to load this sweep cell into the Simulator tab (draft settings;
-                    rebuild to refresh the timeline).
-                  </dd>
-              <dt>bd</dt>
-              <dd>Adaptive firmware baselineDrive (minimum sampling drive).</dd>
-              <dt>mw</dt>
-              <dd>Adaptive motionWeight — contribution of motion-derived drive spikes.</dd>
-              <dt>pw</dt>
-              <dd>Adaptive peerWeight — contribution of socially inferred peer-drive spikes.</dd>
-              <dt>τ peer</dt>
-              <dd>Held peer-drive time constant (seconds) for this sweep cell.</dd>
+              <dt>Cell tint</dt>
+              <dd>
+                Each numeric column uses a red→yellow→green scale from worst to best within that column across all rows
+                (including Juxta). mAh/day and relative energy are greener when lower; capture, efficiency, and most other
+                metrics are greener when higher. Schedule and adaptive parameter columns use highest value as green when the
+                tradeoff is ambiguous. Em dash cells are neutral.
+              </dd>
+              <dt>Policy</dt>
+              <dd>
+                Sweep policy id. Use <strong>Simulate</strong> to load into the Simulator tab (auto-build). Violet outline
+                on plots marks the policy matching your current built simulation when applicable.
+              </dd>
+              <dt>bd / mw / pw / τ peer</dt>
+              <dd>Adaptive swept parameters only (— for fixed-rate rows).</dd>
+              <dt>Scan / Win / Advertise</dt>
+              <dd>
+                Configured fixed-rate schedule: <strong>scan interval</strong>, <strong>scan (listen) window</strong>, and{" "}
+                <strong>advertise interval</strong> (seconds between advertising bursts). Em dash for adaptive rows.
+              </dd>
               <dt>Capture</dt>
               <dd>Mean interval-level BLE capture rate across seeds included in this run.</dd>
               <dt>mAh/day</dt>
               <dd>Mean estimated representative-collar BLE energy burden (milliamp-hours per day).</dd>
               <dt>Efficiency</dt>
               <dd>BLE hits per unit energy (capture rate scaled by estimated mAh/day), same notion as simulator metrics panels.</dd>
-              <dt>Rel cap</dt>
+              <dt>Pareto</dt>
               <dd>
-                {`Mean relative capture vs Fixed Juxta baseline (< 1 weaker capture, > 1 stronger than baseline).`}
+                Yes if this policy is <strong>not dominated</strong> on mean capture rate vs mean mAh/day by any other policy
+                in the sweep (including Juxta). Same rule as the green outline on scatter plots.
               </dd>
+              <dt>Rel cap</dt>
+              <dd>{`Mean relative capture vs Juxta 5.6 (< 1 weaker, > 1 stronger).`}</dd>
               <dt>Rel E</dt>
-              <dd>{`Mean relative BLE energy vs baseline (< 1 uses less BLE energy than baseline).`}</dd>
+              <dd>{`Mean relative BLE energy vs Juxta 5.6 (< 1 uses less energy).`}</dd>
               <dt>Mean drive</dt>
-              <dd>Time-weighted mean sampling drive averaged across collars and seeds (neutral = fixed-rate analogue).</dd>
+              <dd>Adaptive mean sampling drive (— for fixed-rate).</dd>
               <dt>% below / near / above</dt>
-              <dd>Share of epochs where cohort mean drive sits below / near neutral / above fixed-rate band (from adaptive logs).</dd>
+              <dd>Adaptive drive distribution vs fixed-rate band (— for fixed-rate).</dd>
             </dl>
           </InfoPopover>
         </div>
@@ -221,14 +463,19 @@ export function SweepReportPanel({
             <thead>
               <tr>
                 <th>Rank</th>
+                <th title="Algorithm family">Alg</th>
                 <th>Policy</th>
                 <th>bd</th>
                 <th>mw</th>
                 <th>pw</th>
                 <th>τ peer</th>
+                <th title="BLE scan interval">Scan int. (s)</th>
+                <th title="Scan burst listen window">Scan win. (s)</th>
+                <th title="Interval between advertising bursts">Advertise int. (s)</th>
                 <th>Capture</th>
                 <th>mAh/day</th>
                 <th>Efficiency</th>
+                <th title="Non-dominated on capture vs mAh/day">Pareto</th>
                 <th>Rel cap</th>
                 <th>Rel E</th>
                 <th>Mean drive</th>
@@ -240,26 +487,14 @@ export function SweepReportPanel({
             <tbody>
               {sweepResult ? (
                 <>
-                  <tr className="sweep-table-baseline">
-                    <td>—</td>
-                    <td colSpan={5}>Fixed Juxta baseline</td>
-                    <td>{sweepResult.baselineSummary.meanCaptureRate.toFixed(4)}</td>
-                    <td>{sweepResult.baselineSummary.meanMahPerDay.toFixed(4)}</td>
-                    <td>{sweepResult.baselineSummary.meanBleEfficiency.toFixed(4)}</td>
-                    <td>1</td>
-                    <td>1</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                  {summariesByEfficiency.map((summary, index) => (
+                  {tableRowsRanked.map((summary, index) => (
                     <SweepTableRow
                       key={summary.policyId}
                       rank={index + 1}
-                      rowStyle={efficiencyRowStyle(summary.meanBleEfficiency, efficiencyRange.min, efficiencyRange.max)}
+                      metricStyles={sweepTableMetricStyles?.byPolicy.get(summary.policyId)}
                       summary={summary}
                       rawRows={sweepResult.rawRows}
+                      baseConfig={baseConfig}
                       onSimulatePolicy={onSimulatePolicy}
                       simulateDisabled={simulateDisabled}
                     />
@@ -268,8 +503,7 @@ export function SweepReportPanel({
               ) : (
                 <tr>
                   <td colSpan={sweepTableColSpan} className="sweep-table-placeholder-cell">
-                    Baseline row and adaptive candidates appear here after you run a sweep. Rank is by mean BLE efficiency
-                    among adaptive policies.
+                    Fixed-rate (including Juxta 5.6) and adaptive policies appear here ranked by efficiency after you run a sweep.
                   </td>
                 </tr>
               )}
@@ -301,37 +535,49 @@ export function SweepReportPanel({
 
 function SweepTableRow({
   rank,
-  rowStyle,
+  metricStyles,
   summary,
   rawRows,
+  baseConfig,
   onSimulatePolicy,
   simulateDisabled
 }: {
   rank: number;
-  rowStyle?: CSSProperties;
+  metricStyles: Record<SweepMetricColumn, CSSProperties> | undefined;
   summary: SweepPolicySummary;
-  rawRows: import("../simulation/sweep/adaptiveBleSweep").SweepRawRow[];
+  rawRows: SweepRawRow[];
+  baseConfig: SimulationConfig;
   onSimulatePolicy?: (summary: SweepPolicySummary) => void;
   simulateDisabled?: boolean;
 }) {
-  const samples = rawRows.filter((row) => row.policyId === summary.policyId);
-  const avgNullable = (pick: (row: import("../simulation/sweep/adaptiveBleSweep").SweepRawRow) => number | null) => {
-    const values = samples.map(pick).filter((value): value is number => value != null);
-    if (values.length === 0) {
-      return null;
-    }
-    return values.reduce((accumulator, value) => accumulator + value, 0) / values.length;
-  };
-  const meanDrive = avgNullable((row) => row.meanSamplingDrive);
-  const pctBelow = avgNullable((row) => row.percentTimeBelowFixed);
-  const pctNear = avgNullable((row) => row.percentTimeNearFixed);
-  const pctAbove = avgNullable((row) => row.percentTimeAboveFixed);
+  const derived = sweepRowDerivedMetrics(summary, rawRows);
+  const meanDrive = derived.meanDrive;
+  const pctBelow = derived.pctBelow;
+  const pctNear = derived.pctNear;
+  const pctAbove = derived.pctAbove;
+  const cell = (column: SweepMetricColumn): CSSProperties | undefined => metricStyles?.[column];
 
   const canSimulate = Boolean(summary.params && onSimulatePolicy);
+  const badge = algBadge(summary);
+  const matchesBuilt = sweepSummaryMatchesBuilt(summary, baseConfig);
+  const p = summary.params;
+
+  const bd = p?.family === "adaptive" ? p.baselineDrive : "—";
+  const mw = p?.family === "adaptive" ? p.motionWeight : "—";
+  const pw = p?.family === "adaptive" ? p.peerWeight : "—";
+  const tau = p?.family === "adaptive" ? p.tauPeerSeconds : "—";
+  const scanInt = p?.family === "fixed" ? p.scanIntervalSeconds : "—";
+  const scanWin = p?.family === "fixed" ? p.scanWindowSeconds : "—";
+  const advInt = p?.family === "fixed" ? p.advIntervalSeconds : "—";
 
   return (
-    <tr style={rowStyle}>
-      <td>{rank}</td>
+    <tr className={matchesBuilt ? "sweep-table-row-matches-built" : undefined}>
+      <td style={cell("rank")}>{rank}</td>
+      <td>
+        <span className={badge.className} title={badge.title}>
+          {badge.letter}
+        </span>
+      </td>
       <td className="sweep-policy-id" title={`${summary.policyId} — ${summary.label}`}>
         <span className="sweep-policy-id-text">{summary.policyId}</span>
         {canSimulate ? (
@@ -345,19 +591,23 @@ function SweepTableRow({
           </button>
         ) : null}
       </td>
-      <td>{summary.params?.baselineDrive ?? "—"}</td>
-      <td>{summary.params?.motionWeight ?? "—"}</td>
-      <td>{summary.params?.peerWeight ?? "—"}</td>
-      <td>{summary.params?.tauPeerSeconds ?? "—"}</td>
-      <td>{summary.meanCaptureRate.toFixed(4)}</td>
-      <td>{summary.meanMahPerDay.toFixed(4)}</td>
-      <td>{summary.meanBleEfficiency.toFixed(4)}</td>
-      <td>{summary.meanRelativeCapture.toFixed(3)}</td>
-      <td>{summary.meanRelativeEnergy.toFixed(3)}</td>
-      <td>{meanDrive != null ? meanDrive.toFixed(3) : "—"}</td>
-      <td>{pctBelow != null ? pctBelow.toFixed(1) : "—"}</td>
-      <td>{pctNear != null ? pctNear.toFixed(1) : "—"}</td>
-      <td>{pctAbove != null ? pctAbove.toFixed(1) : "—"}</td>
+      <td style={cell("bd")}>{bd}</td>
+      <td style={cell("mw")}>{mw}</td>
+      <td style={cell("pw")}>{pw}</td>
+      <td style={cell("tauPeer")}>{tau}</td>
+      <td style={cell("scanInt")}>{scanInt}</td>
+      <td style={cell("scanWin")}>{scanWin}</td>
+      <td style={cell("advInt")}>{advInt}</td>
+      <td style={cell("capture")}>{summary.meanCaptureRate.toFixed(4)}</td>
+      <td style={cell("mAh")}>{summary.meanMahPerDay.toFixed(4)}</td>
+      <td style={cell("efficiency")}>{summary.meanBleEfficiency.toFixed(4)}</td>
+      <td>{summary.isParetoEfficient ? "Yes" : "No"}</td>
+      <td style={cell("relCap")}>{summary.meanRelativeCapture.toFixed(3)}</td>
+      <td style={cell("relE")}>{summary.meanRelativeEnergy.toFixed(3)}</td>
+      <td style={cell("meanDrive")}>{meanDrive != null ? meanDrive.toFixed(3) : "—"}</td>
+      <td style={cell("pctBelow")}>{pctBelow != null ? pctBelow.toFixed(1) : "—"}</td>
+      <td style={cell("pctNear")}>{pctNear != null ? pctNear.toFixed(1) : "—"}</td>
+      <td style={cell("pctAbove")}>{pctAbove != null ? pctAbove.toFixed(1) : "—"}</td>
     </tr>
   );
 }
@@ -370,15 +620,19 @@ function SweepCandidatesSection({
   baseline: SweepPolicySummary;
 }) {
   const titles: Record<CandidatePick["role"], string> = {
-    energySaving: "Energy-saving candidate",
-    balanced: "Balanced candidate",
-    highCapture: "High-capture candidate"
+    bestFixed: "Best fixed-rate (vs pool incl. Juxta 5.6)",
+    bestAdaptive: "Best adaptive"
   };
 
   return (
     <section className="sweep-candidates">
-      <h3>Top recommendations</h3>
-      <div className="sweep-candidate-cards">
+      <h3>Efficiency comparison</h3>
+      <p className="helper-text sweep-candidates-intro">
+        Highest mean BLE efficiency in each family. Fixed-rate sweep spans scan interval, scan window, and{" "}
+        <strong>advertise interval</strong> (2 s burst held constant). Metrics are relative to Juxta 5.6 ({baseline.policyId}
+        ).
+      </p>
+      <div className="sweep-candidate-cards sweep-candidate-cards--vs">
         {candidates.map((pick) => (
           <div key={pick.role} className="sweep-candidate-card">
             <h4>{titles[pick.role]}</h4>
@@ -388,11 +642,11 @@ function SweepCandidatesSection({
               <>
                 <p className="sweep-candidate-id">{pick.summary.policyId}</p>
                 <ul className="sweep-candidate-metrics">
-                  <li>Mean capture: {pick.summary.meanCaptureRate.toFixed(4)} (baseline {baseline.meanCaptureRate.toFixed(4)})</li>
+                  <li>Mean capture: {pick.summary.meanCaptureRate.toFixed(4)} (Juxta ref {baseline.meanCaptureRate.toFixed(4)})</li>
                   <li>Relative capture: {pick.summary.meanRelativeCapture.toFixed(3)}</li>
                   <li>Mean mAh/day: {pick.summary.meanMahPerDay.toFixed(4)}</li>
-                  <li>Relative energy: {pick.summary.meanRelativeEnergy.toFixed(3)}</li>
-                  <li>Threshold: {pick.meetsThreshold ? "met" : "not met"}</li>
+                  <li>Efficiency (cap / mAh·day): {pick.summary.meanBleEfficiency.toFixed(4)}</li>
+                  <li>Threshold note: {pick.meetsThreshold ? "criteria met" : "see note below"}</li>
                 </ul>
                 {pick.note ? <p className="helper-text">{pick.note}</p> : null}
               </>
@@ -404,7 +658,7 @@ function SweepCandidatesSection({
   );
 }
 
-const SWEEP_CANDIDATE_CARD_TITLES = ["Energy-saving candidate", "Balanced candidate", "High-capture candidate"] as const;
+const SWEEP_CANDIDATE_CARD_TITLES = ["Best fixed-rate", "Best adaptive"] as const;
 
 function SweepRecommendationsPlaceholder() {
   return (
@@ -415,8 +669,7 @@ function SweepRecommendationsPlaceholder() {
           <div key={title} className="sweep-candidate-card sweep-candidate-card--placeholder">
             <h4>{title}</h4>
             <p className="helper-text sweep-placeholder-text">
-              Recommended policies from this sweep appear here after you use <strong>Run adaptive sweep</strong> in the
-              sidebar.
+              Best fixed vs best adaptive (by efficiency) appear here after you run a sweep from the sidebar.
             </p>
           </div>
         ))}
@@ -426,44 +679,86 @@ function SweepRecommendationsPlaceholder() {
 }
 
 function SweepPlotPlaceholder({
+  axesPopoverTitle,
+  axesPopoverChildren,
   title,
   subtitle,
   hint
 }: {
+  axesPopoverTitle: string;
+  axesPopoverChildren: ReactNode;
   title: string;
   subtitle: string;
   hint: string;
 }) {
   return (
     <figure className="sweep-plot sweep-plot--placeholder">
-      <figcaption>
-        <strong>{title}</strong>
-        <span className="helper-text">{subtitle}</span>
-      </figcaption>
+      <div className="panel-title-row sweep-plot-title-row">
+        <figcaption className="sweep-plot-figcaption">
+          <strong>{title}</strong>
+          <span className="helper-text">{subtitle}</span>
+        </figcaption>
+        <InfoPopover label="What the axes mean" title={axesPopoverTitle}>
+          {axesPopoverChildren}
+        </InfoPopover>
+      </div>
       <div className="sweep-plot-placeholder-frame" aria-hidden="true">
         Scatter plot renders here when the sweep finishes.
       </div>
+      <SweepPlotLegendHtml />
       <span className="sweep-plot-hint">{hint}</span>
     </figure>
   );
 }
 
-type PlotPoint = { x: number; y: number; id: string; tooltip: string };
+/** Legend below the chart (same marker language as the Simulation tab time-series legends). */
+function SweepPlotLegendHtml() {
+  return (
+    <div className="chart-legend sweep-chart-legend" aria-label="Plot legend">
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--fixed" aria-hidden />
+        Fixed-rate sweep
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--adaptive" aria-hidden />
+        Adaptive sweep
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--juxta" aria-hidden />
+        Juxta 5.6 reference
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--built" aria-hidden />
+        Matches built simulator
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--pareto" aria-hidden />
+        Pareto-efficient
+      </span>
+    </div>
+  );
+}
 
 function SweepScatterPlot({
+  axesPopoverTitle,
+  axesPopoverChildren,
   title,
   subtitle,
   xLabel,
   yLabel,
   baselinePoint,
+  baselineMatchesBuilt,
   points
 }: {
+  axesPopoverTitle: string;
+  axesPopoverChildren: ReactNode;
   title: string;
   subtitle: string;
   xLabel: string;
   yLabel: string;
-  baselinePoint: { x: number; y: number; label: string; tooltip: string };
-  points: PlotPoint[];
+  baselinePoint: { x: number; y: number; label: string; tooltip: string; pareto?: boolean };
+  baselineMatchesBuilt: boolean;
+  points: ScatterPoint[];
 }) {
   const width = SWEEP_PLOT_WIDTH;
   const height = SWEEP_PLOT_HEIGHT;
@@ -486,13 +781,20 @@ function SweepScatterPlot({
   const plotCenterX = pad.left + plotW / 2;
   const plotMidY = pad.top + plotH / 2;
   const leftMarginCenterX = pad.left / 2;
+  const bx = sx(baselinePoint.x);
+  const by = sy(baselinePoint.y);
 
   return (
     <figure className="sweep-plot">
-      <figcaption>
-        <strong>{title}</strong>
-        <span className="helper-text">{subtitle}</span>
-      </figcaption>
+      <div className="panel-title-row sweep-plot-title-row">
+        <figcaption className="sweep-plot-figcaption">
+          <strong>{title}</strong>
+          <span className="helper-text">{subtitle}</span>
+        </figcaption>
+        <InfoPopover label="What the axes mean" title={axesPopoverTitle}>
+          {axesPopoverChildren}
+        </InfoPopover>
+      </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="sweep-scatter-svg"
@@ -500,22 +802,41 @@ function SweepScatterPlot({
         aria-label={title}
       >
         <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="rgba(13,22,32,0.6)" stroke="#223245" />
-        {points.map((point) => (
-          <g key={point.id}>
-            <title>{point.tooltip}</title>
-            <circle cx={sx(point.x)} cy={sy(point.y)} r={5} fill="#7dd3fc" opacity={0.92} />
-          </g>
-        ))}
+        {points.map((point) => {
+          const cx = sx(point.x);
+          const cy = sy(point.y);
+          const fill = point.variant === "adaptive" ? "#7dd3fc" : "#fbbf24";
+          return (
+            <g key={point.id}>
+              <title>{point.tooltip}</title>
+              {point.pareto ? (
+                <circle cx={cx} cy={cy} r={8} fill="none" stroke="#34d399" strokeWidth={1.75} />
+              ) : null}
+              {point.highlight ? (
+                <circle cx={cx} cy={cy} r={11} fill="none" stroke="#a78bfa" strokeWidth={2} />
+              ) : null}
+              <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
+            </g>
+          );
+        })}
         <g>
           <title>{baselinePoint.tooltip}</title>
-          <circle cx={sx(baselinePoint.x)} cy={sy(baselinePoint.y)} r={9} fill="#fbbf24" opacity={0.95} />
+          {baselinePoint.pareto ? (
+            <circle cx={bx} cy={by} r={15} fill="none" stroke="#34d399" strokeWidth={1.75} />
+          ) : null}
+          {baselineMatchesBuilt ? <circle cx={bx} cy={by} r={13} fill="none" stroke="#a78bfa" strokeWidth={2} /> : null}
+          <circle
+            cx={bx}
+            cy={by}
+            r={9}
+            fill="#fbbf24"
+            opacity={0.95}
+            stroke="#fef3c7"
+            strokeWidth={2}
+            strokeDasharray="5 4"
+          />
         </g>
-        <text
-          x={sx(baselinePoint.x) + 12}
-          y={sy(baselinePoint.y) - 10}
-          fill="#e7eef6"
-          fontSize={SWEEP_PLOT_SVG_FONT_BASELINE_LABEL}
-        >
+        <text x={bx + 12} y={by - 10} fill="#e7eef6" fontSize={SWEEP_PLOT_SVG_FONT_BASELINE_LABEL}>
           {baselinePoint.label}
         </text>
         <text
@@ -540,95 +861,8 @@ function SweepScatterPlot({
           {yLabel}
         </text>
       </svg>
-      <span className="sweep-plot-hint">Legend: gold = Fixed Juxta baseline; cyan = adaptive sweep points. Hover any circle for policy id and swept parameters.</span>
-    </figure>
-  );
-}
-
-function SweepRelativeTradeoffPlot({ summaries }: { summaries: SweepPolicySummary[] }) {
-  const width = SWEEP_PLOT_WIDTH;
-  const height = SWEEP_PLOT_HEIGHT;
-  const pad = SWEEP_PLOT_PAD;
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-
-  const xs = [1, ...summaries.map((summary) => summary.meanRelativeEnergy)];
-  const ys = [1, ...summaries.map((summary) => summary.meanRelativeCapture)];
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
-  const yMin = Math.min(...ys);
-  const yMax = Math.max(...ys);
-  const xPad = (xMax - xMin) * 0.08 || 0.05;
-  const yPad = (yMax - yMin) * 0.08 || 0.05;
-
-  const sx = (x: number) => pad.left + ((x - (xMin - xPad)) / (xMax - xMin + 2 * xPad || 1)) * plotW;
-  const sy = (y: number) => pad.top + plotH - ((y - (yMin - yPad)) / (yMax - yMin + 2 * yPad || 1)) * plotH;
-
-  const refX = sx(1);
-  const refY = sy(1);
-  const baselineTooltip =
-    "Fixed Juxta baseline — relative energy 1, relative capture 1 (reference for adaptive cells in this sweep)";
-  const plotCenterX = pad.left + plotW / 2;
-  const plotMidY = pad.top + plotH / 2;
-  const leftMarginCenterX = pad.left / 2;
-
-  return (
-    <figure className="sweep-plot">
-      <figcaption>
-        <strong>Relative capture vs relative energy</strong>
-        <span className="helper-text">Reference lines at fixed-rate energy (x=1) and capture (y=1).</span>
-      </figcaption>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="sweep-scatter-svg"
-        preserveAspectRatio="xMidYMid meet"
-        aria-label="Relative capture vs relative energy"
-      >
-        <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="rgba(13,22,32,0.6)" stroke="#223245" />
-        <line x1={refX} y1={pad.top} x2={refX} y2={pad.top + plotH} stroke="rgba(231,238,246,0.25)" strokeDasharray="4 4" />
-        <line x1={pad.left} y1={refY} x2={pad.left + plotW} y2={refY} stroke="rgba(231,238,246,0.25)" strokeDasharray="4 4" />
-        {summaries.map((summary) => (
-          <g key={summary.policyId}>
-            <title>{policyHoverLabel(summary)}</title>
-            <circle
-              cx={sx(summary.meanRelativeEnergy)}
-              cy={sy(summary.meanRelativeCapture)}
-              r={5}
-              fill="#7dd3fc"
-              opacity={0.92}
-            />
-          </g>
-        ))}
-        <g>
-          <title>{baselineTooltip}</title>
-          <circle cx={sx(1)} cy={sy(1)} r={9} fill="#fbbf24" opacity={0.95} />
-        </g>
-        <text x={sx(1) + 12} y={sy(1) - 10} fill="#e7eef6" fontSize={SWEEP_PLOT_SVG_FONT_BASELINE_LABEL}>
-          Fixed Juxta baseline
-        </text>
-        <text
-          x={plotCenterX}
-          y={height - 10}
-          fill="#90a4b8"
-          fontSize={SWEEP_PLOT_SVG_FONT_AXIS}
-          textAnchor="middle"
-          dominantBaseline="middle"
-        >
-          Relative energy
-        </text>
-        <text
-          x={leftMarginCenterX}
-          y={plotMidY}
-          fill="#90a4b8"
-          fontSize={SWEEP_PLOT_SVG_FONT_AXIS}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          transform={`rotate(-90 ${leftMarginCenterX} ${plotMidY})`}
-        >
-          Relative capture
-        </text>
-      </svg>
-      <span className="sweep-plot-hint">Hover cyan points for adaptive policy id and parameters; baseline is relative (1, 1).</span>
+      <SweepPlotLegendHtml />
+      <span className="sweep-plot-hint">Hover points for policy id.</span>
     </figure>
   );
 }

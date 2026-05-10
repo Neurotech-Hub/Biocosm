@@ -4,7 +4,9 @@ import {
   adaptiveSweepPolicyCount,
   buildSweepGridPolicies,
   buildSweepTrials,
+  fixedSweepPolicyCount,
   finalizeSweepBundle,
+  policiesPerSweepSeed,
   runSingleSweepTrialSync,
   SWEEP_BASELINE_POLICY_ID,
   SWEEP_FULL_BASELINE_DRIVES,
@@ -21,7 +23,7 @@ import { pickSweepCandidates } from "./sweepCandidates";
 import type { SweepPolicySummary } from "./sweepCandidates";
 
 describe("adaptive BLE sweep", () => {
-  it("defaults to Juxta-bracketing quick grid (24 adaptive); full grid is 90 adaptive policies", () => {
+  it("defaults to quick grid: fixed (27 incl. Juxta 5.6) + 54 adaptive; full adaptive grid is 90", () => {
     const fullProduct =
       SWEEP_FULL_BASELINE_DRIVES.length *
       SWEEP_FULL_MOTION_WEIGHTS.length *
@@ -33,20 +35,23 @@ describe("adaptive BLE sweep", () => {
       SWEEP_QUICK_PEER_WEIGHTS.length *
       SWEEP_QUICK_TAU_PEER_SECONDS.length;
     expect(fullProduct).toBe(90);
-    expect(quickProduct).toBe(24);
+    expect(quickProduct).toBe(54);
 
+    expect(fixedSweepPolicyCount()).toBe(27);
     expect(adaptiveSweepPolicyCount()).toBe(quickProduct);
+    expect(policiesPerSweepSeed()).toBe(27 + quickProduct);
     expect(buildSweepGridPolicies()).toHaveLength(quickProduct);
     expect(buildSweepTrials("fast", "42")).toHaveLength(sweepTrialCount("fast"));
     expect(buildSweepTrials("report", "42")).toHaveLength(sweepTrialCount("report"));
-    expect(sweepTrialCount("fast")).toBe(25);
-    expect(sweepTrialCount("report")).toBe(75);
+    expect(sweepTrialCount("fast")).toBe(81);
+    expect(sweepTrialCount("report")).toBe(243);
   });
 
   it("quick grid includes low-duty and upscale corners (brackets Juxta on drive)", () => {
     const policies = buildSweepGridPolicies();
     expect(policies.some((p) => p.baselineDrive === 0.12 && p.motionWeight === 0.22 && p.peerWeight === 0.35)).toBe(true);
     expect(policies.some((p) => p.baselineDrive === 0.45 && p.motionWeight === 0.5 && p.peerWeight === 0.85)).toBe(true);
+    expect(policies.some((p) => p.peerWeight === 0.6 && p.tauPeerSeconds === 300)).toBe(true);
   });
 
   it("aggregates rows and selects candidates", () => {
@@ -54,6 +59,9 @@ describe("adaptive BLE sweep", () => {
       policyId: SWEEP_BASELINE_POLICY_ID,
       kind: "baseline_fixed",
       seed: "101",
+      scheduledScanIntervalSeconds: 20,
+      scheduledScanWindowSeconds: 1.5,
+      scheduledAdvIntervalSeconds: 5,
       baselineDrive: null,
       motionWeight: null,
       peerWeight: null,
@@ -87,6 +95,9 @@ describe("adaptive BLE sweep", () => {
       baseRow({
         policyId: "ad-a",
         kind: "adaptive",
+        scheduledScanIntervalSeconds: null,
+        scheduledScanWindowSeconds: null,
+        scheduledAdvIntervalSeconds: null,
         baselineDrive: 0.25,
         motionWeight: 0.25,
         peerWeight: 0.5,
@@ -105,6 +116,9 @@ describe("adaptive BLE sweep", () => {
       baseRow({
         policyId: "ad-b",
         kind: "adaptive",
+        scheduledScanIntervalSeconds: null,
+        scheduledScanWindowSeconds: null,
+        scheduledAdvIntervalSeconds: null,
         baselineDrive: 0.5,
         motionWeight: 0.5,
         peerWeight: 1,
@@ -125,7 +139,9 @@ describe("adaptive BLE sweep", () => {
     const bundle = finalizeSweepBundle(rows, "fast");
     expect(bundle.baselineSummary.meanCaptureRate).toBeCloseTo(0.5);
     expect(bundle.summaries).toHaveLength(2);
-    expect(bundle.candidates).toHaveLength(3);
+    expect(bundle.candidates).toHaveLength(2);
+    // Raw BLE efficiency = capture / mAh; ad-a (0.096) beats ad-b (~0.080) among policies meeting capture threshold.
+    expect(bundle.candidates.find((c) => c.role === "bestAdaptive")?.summary?.policyId).toBe("ad-a");
   });
 
   it("runs a tiny baseline sweep trial deterministically", () => {
@@ -138,7 +154,9 @@ describe("adaptive BLE sweep", () => {
       pathNodeCount: 6
     };
     const trials = buildSweepTrials("fast", tiny.seed);
-    const row = runSingleSweepTrialSync(tiny, trials[0]!);
+    const baselineTrial = trials.find((t) => t.policyId === SWEEP_BASELINE_POLICY_ID);
+    expect(baselineTrial).toBeDefined();
+    const row = runSingleSweepTrialSync(tiny, baselineTrial!);
     expect(row.policyId).toBe(SWEEP_BASELINE_POLICY_ID);
     expect(row.captureRate).toBeGreaterThanOrEqual(0);
     expect(row.mAhPerDay).toBeGreaterThanOrEqual(0);
@@ -151,29 +169,44 @@ describe("pickSweepCandidates", () => {
       policyId: "base",
       kind: "baseline_fixed",
       label: "baseline",
-      params: null,
+      isJuxtaReference: true,
+      params: {
+        family: "fixed",
+        scanIntervalSeconds: 20,
+        scanWindowSeconds: 1.5,
+        advIntervalSeconds: 5
+      },
       meanCaptureRate: 0.5,
       meanMahPerDay: 6,
       meanBleEfficiency: 0.5 / 6,
       meanRelativeCapture: 1,
       meanRelativeEnergy: 1,
       meanRelativeEfficiency: 1,
-      seedsUsed: 1
+      seedsUsed: 1,
+      isParetoEfficient: true
     };
     const hiEff: SweepPolicySummary = {
       policyId: "p1",
       kind: "adaptive",
       label: "hi",
-      params: { baselineDrive: 0.4, motionWeight: 0.25, peerWeight: 0.5, tauPeerSeconds: 120 },
+      params: {
+        family: "adaptive",
+        baselineDrive: 0.4,
+        motionWeight: 0.25,
+        peerWeight: 0.5,
+        tauPeerSeconds: 120
+      },
       meanCaptureRate: 0.52,
       meanMahPerDay: 6.3,
       meanBleEfficiency: 0.52 / 6.3,
       meanRelativeCapture: 1.04,
       meanRelativeEnergy: 1.05,
       meanRelativeEfficiency: 1.1,
-      seedsUsed: 1
+      seedsUsed: 1,
+      isParetoEfficient: true
     };
-    const picks = pickSweepCandidates([baseline, hiEff], baseline.meanCaptureRate);
-    expect(picks.find((pick) => pick.role === "balanced")?.summary?.policyId).toBe("p1");
+    const picks = pickSweepCandidates(baseline, [hiEff], baseline.meanCaptureRate);
+    expect(picks.find((pick) => pick.role === "bestAdaptive")?.summary?.policyId).toBe("p1");
+    expect(picks.find((pick) => pick.role === "bestFixed")?.summary?.policyId).toBe("base");
   });
 });

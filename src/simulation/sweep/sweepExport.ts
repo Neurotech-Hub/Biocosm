@@ -1,6 +1,7 @@
 import type { SimulationConfig } from "../types";
-import type { CandidatePick } from "./sweepCandidates";
+import type { CandidatePick, SweepPolicyParams } from "./sweepCandidates";
 import type { SweepRawRow, SweepResultBundle } from "./adaptiveBleSweep";
+import type { SweepPolicySummary } from "./sweepCandidates";
 import {
   ADAPTIVE_SWEEP_TIMING_ANCHORS,
   SWEEP_HELD_ADAPTIVE,
@@ -21,6 +22,10 @@ function csvEscape(value: string | number | boolean | null | undefined): string 
 const RAW_HEADERS = [
   "policyId",
   "seed",
+  "kind",
+  "scheduledScanIntervalSeconds",
+  "scheduledScanWindowSeconds",
+  "scheduledAdvIntervalSeconds",
   "baselineDrive",
   "motionWeight",
   "peerWeight",
@@ -55,6 +60,10 @@ export function serializeSweepRawCsv(rows: SweepRawRow[]): string {
       [
         row.policyId,
         row.seed,
+        row.kind,
+        row.scheduledScanIntervalSeconds ?? "",
+        row.scheduledScanWindowSeconds ?? "",
+        row.scheduledAdvIntervalSeconds ?? "",
         row.baselineDrive ?? "",
         row.motionWeight ?? "",
         row.peerWeight ?? "",
@@ -92,10 +101,14 @@ const SUMMARY_HEADERS = [
   "rank",
   "policyId",
   "label",
-  "baselineDrive",
-  "motionWeight",
-  "peerWeight",
-  "tauPeerSeconds",
+  "kind",
+  "adaptive_baselineDrive",
+  "adaptive_motionWeight",
+  "adaptive_peerWeight",
+  "adaptive_tauPeerSeconds",
+  "fixed_scanIntervalSeconds",
+  "fixed_scanWindowSeconds",
+  "fixed_advIntervalSeconds",
   "meanCaptureRate",
   "stdCaptureRate",
   "meanMahPerDay",
@@ -103,51 +116,72 @@ const SUMMARY_HEADERS = [
   "meanRelativeCapture",
   "meanRelativeEnergy",
   "meanRelativeEfficiency",
-  "seedsUsed"
+  "seedsUsed",
+  "isParetoEfficient"
 ] as const;
 
-export function serializeSweepSummaryCsv(
-  bundle: SweepResultBundle,
-  rankedAdaptiveIds: string[]
-): string {
-  const rankById = new Map(rankedAdaptiveIds.map((id, index) => [id, index + 1]));
+function summaryParamColumns(params: SweepPolicyParams | null): {
+  bd: string;
+  mw: string;
+  pw: string;
+  tau: string;
+  scan: string;
+  win: string;
+  adv: string;
+} {
+  if (!params) {
+    return { bd: "", mw: "", pw: "", tau: "", scan: "", win: "", adv: "" };
+  }
+  if (params.family === "adaptive") {
+    return {
+      bd: String(params.baselineDrive),
+      mw: String(params.motionWeight),
+      pw: String(params.peerWeight),
+      tau: String(params.tauPeerSeconds),
+      scan: "",
+      win: "",
+      adv: ""
+    };
+  }
+  return {
+    bd: "",
+    mw: "",
+    pw: "",
+    tau: "",
+    scan: String(params.scanIntervalSeconds),
+    win: String(params.scanWindowSeconds),
+    adv: String(params.advIntervalSeconds)
+  };
+}
+
+/** Juxta baseline + all sweep summaries, sorted by mean BLE efficiency (matches UI table). */
+function summariesRankedByEfficiency(bundle: SweepResultBundle): SweepPolicySummary[] {
+  return [bundle.baselineSummary, ...bundle.summaries].sort(
+    (a, b) => b.meanBleEfficiency - a.meanBleEfficiency
+  );
+}
+
+export function serializeSweepSummaryCsv(bundle: SweepResultBundle): string {
+  const ranked = summariesRankedByEfficiency(bundle);
   const lines = [SUMMARY_HEADERS.join(",")];
 
-  const baselineRow = bundle.baselineSummary;
-  lines.push(
-    [
-      "—",
-      baselineRow.policyId,
-      baselineRow.label,
-      "",
-      "",
-      "",
-      "",
-      baselineRow.meanCaptureRate,
-      baselineRow.stdCaptureRate ?? "",
-      baselineRow.meanMahPerDay,
-      baselineRow.meanBleEfficiency,
-      baselineRow.meanRelativeCapture,
-      baselineRow.meanRelativeEnergy,
-      baselineRow.meanRelativeEfficiency,
-      baselineRow.seedsUsed
-    ]
-      .map(csvEscape)
-      .join(",")
-  );
-
-  for (const summary of bundle.summaries) {
-    const rank = rankById.get(summary.policyId) ?? "";
-    const p = summary.params;
+  for (let index = 0; index < ranked.length; index++) {
+    const summary = ranked[index]!;
+    const rank = index + 1;
+    const c = summaryParamColumns(summary.params);
     lines.push(
       [
         rank,
         summary.policyId,
         summary.label,
-        p?.baselineDrive ?? "",
-        p?.motionWeight ?? "",
-        p?.peerWeight ?? "",
-        p?.tauPeerSeconds ?? "",
+        summary.kind,
+        c.bd,
+        c.mw,
+        c.pw,
+        c.tau,
+        c.scan,
+        c.win,
+        c.adv,
         summary.meanCaptureRate,
         summary.stdCaptureRate ?? "",
         summary.meanMahPerDay,
@@ -155,7 +189,8 @@ export function serializeSweepSummaryCsv(
         summary.meanRelativeCapture,
         summary.meanRelativeEnergy,
         summary.meanRelativeEfficiency,
-        summary.seedsUsed
+        summary.seedsUsed,
+        summary.isParetoEfficient ? "true" : "false"
       ]
         .map(csvEscape)
         .join(",")
@@ -173,7 +208,7 @@ export function buildSweepMarkdownReport(options: {
   const { baseConfig, bundle, candidates } = options;
   const lines: string[] = [];
 
-  lines.push("# Adaptive BLE Policy Sweep Report", "");
+  lines.push("# BLE policy sweep report (fixed + adaptive)", "");
   lines.push("## 1. Simulation settings", "");
   lines.push(`- Simulation length: ${baseConfig.simulationLengthSeconds}s`);
   lines.push(`- Time step: ${baseConfig.timeStepSeconds}s`);
@@ -203,14 +238,9 @@ export function buildSweepMarkdownReport(options: {
   lines.push(`| BLE efficiency (rate / mAh·day⁻¹) | ${b.meanBleEfficiency.toFixed(4)} |`);
   lines.push("");
 
-  lines.push("## 3. Top recommendations", "");
+  lines.push("## 3. Top recommendations (efficiency leaders)", "");
   for (const pick of candidates) {
-    const title =
-      pick.role === "energySaving"
-        ? "Energy-saving candidate"
-        : pick.role === "balanced"
-          ? "Balanced candidate"
-          : "High-capture candidate";
+    const title = pick.role === "bestFixed" ? "Best fixed-rate (incl. Juxta 5.6 pool)" : "Best adaptive";
     lines.push(`### ${title}`);
     if (!pick.summary) {
       lines.push("*No policy selected.*", "");

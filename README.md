@@ -25,9 +25,18 @@ Browser-based simulator for testing BLE-based social proximity logging strategie
 - Assumptions panel explaining the active policy and observation model.
 - Unit tests for determinism, configurable trait generation, movement bounds, serial BLE timing, detection overlap gating, energy use, motion sensing, adaptive drive behavior, world scale effects, time-series helpers, and metrics.
 
-The source specification remains the main product reference:
+## Sweep and policy optimizer
 
-- `adaptive_social_proximity_logger_simulator_spec.md`
+The app has three workspace tabs: **Simulator** (build and replay one configuration), **Sweep** (run a grid of fixed-rate and adaptive policies and browse the aggregated report), and **Policy Optimizer** (available after a sweep completes).
+
+- **Sweep** produces a bundle of per-policy summaries and a **capture rate vs energy** chart (same canonical tradeoff view as the optimizer). Sidebar controls run or cancel the sweep against the last built simulation.
+- **Optimizer** fits ridge response surfaces on **adaptive** sweep rows only, generates **predicted_adaptive** candidates, and merges **observed_fixed** discrete candidates (Juxta baseline plus `fixed_sweep` rows—no surrogate over fixed schedules). **Run optimizer** then **auto-runs verification** (one full simulation per recommendation role on the built world seed); **Retry verification** repeats that step. The main panel shows model fit, a single layered capture-vs-energy plot (observed, predicted cloud, Pareto, recommendation roles, verified points), per-role calibration charts, tables, and CSV/Markdown downloads.
+- **Optimizer** sidebar (`OptimizerControlsPanel`) holds candidate count, optimizer seed, ridge λ, and run/retry actions—not sweep controls.
+
+Product specs (authoritative references):
+
+- `docs/adaptive_social_proximity_logger_simulator_spec.md` — simulator behavior and architecture.
+- `docs/biocosm_in_app_surrogate_optimizer_spec.md` — surrogate optimizer pipeline, verification, and exports.
 
 ## Run Locally
 
@@ -58,9 +67,11 @@ Known local environment note: this repo uses Vite 5, `@vitejs/plugin-react` 4, a
 - `src/simulation/radio.ts` computes true dyads and observed BLE detections.
 - `src/simulation/policies/fixedRate.ts` implements the Phase 1 fixed BLE policy.
 - `src/simulation/policies/adaptive.ts` implements motion-plus-peer adaptive BLE drive and timing.
+- `src/simulation/sweep/` defines sweep trials, bundles, and exports; `src/simulation/optimizer/` implements the ridge surrogate pipeline, recommendations, verification runs, and optimizer exports.
 - `src/simulation/analysis.ts` computes the current metrics.
 - `src/components/CanvasVisualizer.tsx` renders the enclosure, graph, animals, true proximity, and observed detections.
 - `src/components/ControlsPanel.tsx`, `src/components/MetricsPanel.tsx`, `src/components/RawDataPanel.tsx`, and `src/components/AssumptionsPanel.tsx` provide the review UI.
+- `src/components/SweepReportPanel.tsx`, `src/components/SweepControlsPanel.tsx`, `src/components/OptimizerPanel.tsx`, and `src/components/OptimizerControlsPanel.tsx` implement the sweep and optimizer workspaces (`src/App.tsx` routes tabs).
 
 ## Tips For Future Agents
 

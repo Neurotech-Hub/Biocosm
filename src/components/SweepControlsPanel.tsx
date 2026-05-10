@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import { InfoPopover } from "./InfoPopover";
 import {
   adaptiveSweepPolicyCount,
+  fixedSweepPolicyCount,
   isFullSweepGrid,
+  policiesPerSweepSeed,
   sweepTrialCount
 } from "../simulation/sweep/adaptiveBleSweep";
 import { buildSweepSimulationBrief } from "../simulation/sweep/sweepSimulationBrief";
@@ -46,17 +48,24 @@ export function SweepControlsPanel({
         <InfoPopover label="Sweep details and grid size" title="About this sweep">
           {isFullSweepGrid() ? (
             <p>
-              Full grid ({adaptiveSweepPolicyCount()} adaptive policies + fixed Juxta baseline per seed) — parameter
-              corners bracket Juxta for both lower-energy and higher-capture regimes.
+              Full grids — per seed: <strong>{fixedSweepPolicyCount()}</strong> fixed-rate schedules (scan interval × scan
+              window × <strong>advertise interval</strong>, 2 s burst; includes Juxta 5.6) +{" "}
+              <strong>{adaptiveSweepPolicyCount()}</strong> adaptive policies (
+              <strong>{policiesPerSweepSeed()}</strong> total).
             </p>
           ) : (
             <p>
-              Quick grid ({adaptiveSweepPolicyCount()} adaptive policies + baseline per seed) — mixes low-duty and
-              upscale-capable settings around Juxta. For the full 90-policy grid, run a production build with{" "}
+              Quick grids — per seed: <strong>{fixedSweepPolicyCount()}</strong> fixed (same axes; Juxta 5.6 included) +{" "}
+              <strong>{adaptiveSweepPolicyCount()}</strong> adaptive (
+              <strong>{policiesPerSweepSeed()}</strong> total). For larger grids, production build with{" "}
               <code>VITE_SWEEP_FULL_GRID=true</code>.
             </p>
           )}
           <p>Uses your last built simulation configuration.</p>
+          <p>
+            Quick adaptive grid: <code>baselineDrive</code> values are below the 0.5 neutral anchor on purpose (energy-saving
+            idle state; motion/peer can ramp duty when active).
+          </p>
           <p>
             Fast preview runs {sweepTrialCount("fast")} simulations total; report mode runs {sweepTrialCount("report")}{" "}
             (seeds 101, 202, 303), then aggregates means.
@@ -108,7 +117,7 @@ export function SweepControlsPanel({
 
       <div className="sweep-actions">
         <button type="button" className="primary-button sweep-run-button" disabled={isSweepRunning} onClick={onRunSweep}>
-          Run adaptive sweep
+          Run policy sweep
         </button>
         {isSweepRunning ? (
           <button type="button" className="secondary-button" onClick={onCancelSweep}>

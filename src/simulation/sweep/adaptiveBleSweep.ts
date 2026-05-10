@@ -3,6 +3,7 @@ import { juxtaMainCMode0FixedPolicy } from "../config";
 import { mergeLogs, runSimulationToEnd, stepSimulation } from "../engine";
 import type {
   FirmwarePolicyConfig,
+  FixedPolicyConfig,
   MotionPeerAdaptivePolicyConfig,
   SimulationConfig,
   SimulationLogs,
@@ -14,8 +15,10 @@ import {
   computeSamplingDriveDistribution
 } from "./samplingDriveStats";
 import {
+  attachParetoEfficiency,
   pickSweepCandidates,
   type CandidatePick,
+  type SweepPolicyParams,
   type SweepPolicySummary
 } from "./sweepCandidates";
 
@@ -65,8 +68,21 @@ export const SWEEP_FULL_TAU_PEER_SECONDS = [120, 600] as const;
  */
 export const SWEEP_QUICK_BASELINE_DRIVES = [0.12, 0.28, 0.45] as const;
 export const SWEEP_QUICK_MOTION_WEIGHTS = [0.22, 0.5] as const;
-export const SWEEP_QUICK_PEER_WEIGHTS = [0.35, 0.85] as const;
-export const SWEEP_QUICK_TAU_PEER_SECONDS = [120, 600] as const;
+export const SWEEP_QUICK_PEER_WEIGHTS = [0.35, 0.6, 0.85] as const;
+export const SWEEP_QUICK_TAU_PEER_SECONDS = [120, 300, 600] as const;
+
+/**
+ * Fixed-rate sweep: **scan interval × advertise interval × scan window**; `advertisingBurstDurationSeconds` held at 2 s.
+ * Juxta 5.6 (20s scan / 1.5s window / 5s **advertise interval**) is always in the grid.
+ */
+export const SWEEP_FIXED_BURST_SECONDS = 2 as const;
+export const SWEEP_QUICK_FIXED_SCAN_INTERVALS = [10, 20, 40] as const;
+export const SWEEP_QUICK_FIXED_ADV_INTERVALS = [5, 10, 15] as const;
+export const SWEEP_QUICK_FIXED_SCAN_WINDOWS = [1.0, 1.5, 2.5] as const;
+
+export const SWEEP_FULL_FIXED_SCAN_INTERVALS = [5, 10, 15, 20, 30] as const;
+export const SWEEP_FULL_FIXED_ADV_INTERVALS = [5, 10, 15, 20] as const;
+export const SWEEP_FULL_FIXED_SCAN_WINDOWS = [0.5, 1.0, 1.5, 2.0, 2.5] as const;
 
 /** When true, uses the full exploratory grid; otherwise the quick testing grid (default). */
 export function isFullSweepGrid(): boolean {
@@ -79,6 +95,27 @@ type SweepAxes = {
   peerWeights: readonly number[];
   tauPeerSeconds: readonly number[];
 };
+
+type FixedSweepAxes = {
+  scanIntervals: readonly number[];
+  advIntervals: readonly number[];
+  scanWindows: readonly number[];
+};
+
+export function getFixedSweepAxes(): FixedSweepAxes {
+  if (isFullSweepGrid()) {
+    return {
+      scanIntervals: SWEEP_FULL_FIXED_SCAN_INTERVALS,
+      advIntervals: SWEEP_FULL_FIXED_ADV_INTERVALS,
+      scanWindows: SWEEP_FULL_FIXED_SCAN_WINDOWS
+    };
+  }
+  return {
+    scanIntervals: SWEEP_QUICK_FIXED_SCAN_INTERVALS,
+    advIntervals: SWEEP_QUICK_FIXED_ADV_INTERVALS,
+    scanWindows: SWEEP_QUICK_FIXED_SCAN_WINDOWS
+  };
+}
 
 export function getSweepAxes(): SweepAxes {
   if (isFullSweepGrid()) {
@@ -108,17 +145,28 @@ export function adaptiveSweepPolicyCount(): number {
   );
 }
 
-/** Total simulation runs for a sweep (baseline + each adaptive), per spec seeds. */
+/** Number of fixed-rate policies per seed (includes Juxta 5.6 as baseline reference). */
+export function fixedSweepPolicyCount(): number {
+  const ax = getFixedSweepAxes();
+  return ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindows.length;
+}
+
+/** Policies per seed: full fixed grid + adaptive grid. */
+export function policiesPerSweepSeed(): number {
+  return fixedSweepPolicyCount() + adaptiveSweepPolicyCount();
+}
+
+/** Total simulation runs (fixed + adaptive trials), per spec seeds. */
 export function sweepTrialCount(mode: "fast" | "report"): number {
-  const adaptive = adaptiveSweepPolicyCount();
+  const perSeed = policiesPerSweepSeed();
   const seeds = mode === "fast" ? 1 : SWEEP_REPORT_SEEDS.length;
-  return seeds * (1 + adaptive);
+  return seeds * perSeed;
 }
 
 export const SWEEP_REPORT_SEEDS = ["101", "202", "303"] as const;
 export const SWEEP_BASELINE_POLICY_ID = "sweep-baseline-juxta-fixed";
 
-export type SweepPolicyKind = "baseline_fixed" | "adaptive";
+export type SweepPolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
 
 export type SweepTrial = {
   policyId: string;
@@ -131,6 +179,10 @@ export type SweepRawRow = {
   policyId: string;
   kind: SweepPolicyKind;
   seed: string;
+  /** Configured schedule for fixed policies; null for adaptive. */
+  scheduledScanIntervalSeconds: number | null;
+  scheduledScanWindowSeconds: number | null;
+  scheduledAdvIntervalSeconds: number | null;
   baselineDrive: number | null;
   motionWeight: number | null;
   peerWeight: number | null;
@@ -206,6 +258,60 @@ export function buildSweepGridPolicies(): MotionPeerAdaptivePolicyConfig[] {
   return policies;
 }
 
+function isJuxta56Schedule(
+  scanIntervalSeconds: number,
+  advIntervalSeconds: number,
+  scanWindowSeconds: number
+): boolean {
+  return (
+    scanIntervalSeconds === juxtaMainCMode0FixedPolicy.scanIntervalSeconds &&
+    advIntervalSeconds === juxtaMainCMode0FixedPolicy.advIntervalSeconds &&
+    scanWindowSeconds === juxtaMainCMode0FixedPolicy.scanWindowSeconds
+  );
+}
+
+/** One entry per fixed-rate combo in the active grid; Juxta 5.6 is tagged `baseline_fixed`. */
+export function buildFixedSweepTrialDefs(): Omit<SweepTrial, "seed">[] {
+  const axes = getFixedSweepAxes();
+  const trials: Omit<SweepTrial, "seed">[] = [];
+  for (const scanIntervalSeconds of axes.scanIntervals) {
+    for (const advIntervalSeconds of axes.advIntervals) {
+      for (const scanWindowSeconds of axes.scanWindows) {
+        if (isJuxta56Schedule(scanIntervalSeconds, advIntervalSeconds, scanWindowSeconds)) {
+          const policy: FixedPolicyConfig = {
+            ...juxtaMainCMode0FixedPolicy,
+            id: SWEEP_BASELINE_POLICY_ID,
+            name: "Juxta 5.6 (reference)",
+            advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+          };
+          trials.push({
+            policyId: SWEEP_BASELINE_POLICY_ID,
+            kind: "baseline_fixed",
+            policy
+          });
+        } else {
+          const policyId = `sweep-fixed-s${scanIntervalSeconds}-a${advIntervalSeconds}-w${scanWindowSeconds}`;
+          const policy: FixedPolicyConfig = {
+            type: "fixed",
+            id: policyId,
+            name: `Fixed ${scanIntervalSeconds}s scan / ${scanWindowSeconds}s window / ${advIntervalSeconds}s adv`,
+            scanIntervalSeconds,
+            scanWindowSeconds,
+            advIntervalSeconds,
+            advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+          };
+          trials.push({
+            policyId,
+            kind: "fixed_sweep",
+            policy
+          });
+        }
+      }
+    }
+  }
+  return trials;
+}
+
 export function seedsForSweepMode(mode: "fast" | "report", currentSeed: string): string[] {
   return mode === "fast" ? [currentSeed] : [...SWEEP_REPORT_SEEDS];
 }
@@ -213,20 +319,18 @@ export function seedsForSweepMode(mode: "fast" | "report", currentSeed: string):
 export function buildSweepTrials(mode: "fast" | "report", currentSeed: string): SweepTrial[] {
   const seeds = seedsForSweepMode(mode, currentSeed);
   const adaptivePolicies = buildSweepGridPolicies();
-  const baselinePolicy: FirmwarePolicyConfig = {
-    ...juxtaMainCMode0FixedPolicy,
-    id: SWEEP_BASELINE_POLICY_ID,
-    name: "Sweep baseline (Juxta fixed)"
-  };
+  const fixedTrialDefs = buildFixedSweepTrialDefs();
 
   const trials: SweepTrial[] = [];
   for (const seed of seeds) {
-    trials.push({
-      policyId: baselinePolicy.id,
-      kind: "baseline_fixed",
-      seed,
-      policy: baselinePolicy
-    });
+    for (const def of fixedTrialDefs) {
+      trials.push({
+        policyId: def.policyId,
+        kind: def.kind,
+        seed,
+        policy: def.policy
+      });
+    }
     for (const adaptive of adaptivePolicies) {
       trials.push({
         policyId: adaptive.id,
@@ -262,11 +366,15 @@ export function computeSweepRowFromRun(
 
   const policy = trial.policy;
   const adaptive = policy.type === "motion_peer_adaptive" ? policy : null;
+  const fixed = policy.type === "fixed" ? policy : null;
 
   return {
     policyId: trial.policyId,
     kind: trial.kind,
     seed: trial.seed,
+    scheduledScanIntervalSeconds: fixed?.scanIntervalSeconds ?? null,
+    scheduledScanWindowSeconds: fixed?.scanWindowSeconds ?? null,
+    scheduledAdvIntervalSeconds: fixed?.advIntervalSeconds ?? null,
     baselineDrive: adaptive?.baselineDrive ?? null,
     motionWeight: adaptive?.motionWeight ?? null,
     peerWeight: adaptive?.peerWeight ?? null,
@@ -338,6 +446,57 @@ function sampleStd(values: number[]): number {
   return Math.sqrt(variance);
 }
 
+function buildSummaryParams(rows: SweepRawRow[], kind: SweepPolicyKind): SweepPolicyParams | null {
+  const r = rows[0]!;
+  if (kind === "adaptive") {
+    if (
+      r.baselineDrive == null ||
+      r.motionWeight == null ||
+      r.peerWeight == null ||
+      r.tauPeerSeconds == null
+    ) {
+      return null;
+    }
+    return {
+      family: "adaptive",
+      baselineDrive: r.baselineDrive,
+      motionWeight: r.motionWeight,
+      peerWeight: r.peerWeight,
+      tauPeerSeconds: r.tauPeerSeconds
+    };
+  }
+  if (kind === "baseline_fixed" || kind === "fixed_sweep") {
+    if (
+      r.scheduledScanIntervalSeconds == null ||
+      r.scheduledScanWindowSeconds == null ||
+      r.scheduledAdvIntervalSeconds == null
+    ) {
+      return null;
+    }
+    return {
+      family: "fixed",
+      scanIntervalSeconds: r.scheduledScanIntervalSeconds,
+      scanWindowSeconds: r.scheduledScanWindowSeconds,
+      advIntervalSeconds: r.scheduledAdvIntervalSeconds
+    };
+  }
+  return null;
+}
+
+function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string {
+  const r = rows[0]!;
+  if (kind === "baseline_fixed") {
+    return "Juxta 5.6 (reference)";
+  }
+  if (kind === "fixed_sweep") {
+    const s = r.scheduledScanIntervalSeconds ?? "?";
+    const w = r.scheduledScanWindowSeconds ?? "?";
+    const a = r.scheduledAdvIntervalSeconds ?? "?";
+    return `Fixed ${s}s scan / ${w}s win / ${a}s adv`;
+  }
+  return `bd=${r.baselineDrive} mw=${r.motionWeight} pw=${r.peerWeight} τp=${r.tauPeerSeconds}s`;
+}
+
 export function aggregateSweepRows(rawRows: SweepRawRow[]): {
   summaries: SweepPolicySummary[];
   baselineSummary: SweepPolicySummary;
@@ -359,22 +518,15 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
       rows.reduce((sum, row) => sum + (typeof row[field] === "number" ? (row[field] as number) : 0), 0) / rows.length;
 
     const captureRates = rows.map((row) => row.captureRate);
+    const policyKind: SweepPolicySummary["kind"] =
+      kind === "baseline_fixed" ? "baseline_fixed" : kind === "fixed_sweep" ? "fixed_sweep" : "adaptive";
+
     const summary: SweepPolicySummary = {
       policyId,
-      kind: kind === "baseline_fixed" ? "baseline_fixed" : "adaptive",
-      label:
-        kind === "baseline_fixed"
-          ? "Fixed Juxta baseline"
-          : `bd=${rows[0]?.baselineDrive} mw=${rows[0]?.motionWeight} pw=${rows[0]?.peerWeight} τp=${rows[0]?.tauPeerSeconds}s`,
-      params:
-        kind === "baseline_fixed" || rows[0]?.baselineDrive == null
-          ? null
-          : {
-              baselineDrive: rows[0].baselineDrive!,
-              motionWeight: rows[0].motionWeight!,
-              peerWeight: rows[0].peerWeight!,
-              tauPeerSeconds: rows[0].tauPeerSeconds!
-            },
+      kind: policyKind,
+      isJuxtaReference: kind === "baseline_fixed",
+      label: summaryLabelForKind(kind, rows),
+      params: buildSummaryParams(rows, kind),
       meanCaptureRate: captureRates.reduce((a, b) => a + b, 0) / captureRates.length,
       meanMahPerDay: mean("mAhPerDay"),
       meanBleEfficiency: mean("bleEfficiency"),
@@ -382,7 +534,8 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
       meanRelativeEnergy: mean("relativeEnergy"),
       meanRelativeEfficiency: mean("relativeEfficiency"),
       stdCaptureRate: sampleStd(captureRates),
-      seedsUsed
+      seedsUsed,
+      isParetoEfficient: false
     };
 
     if (kind === "baseline_fixed") {
@@ -395,21 +548,28 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
     }
   }
 
-  summaries.sort((a, b) => b.meanCaptureRate - a.meanCaptureRate);
+  summaries.sort((a, b) => b.meanBleEfficiency - a.meanBleEfficiency);
 
   if (!baselineSummary) {
     baselineSummary = {
       policyId: SWEEP_BASELINE_POLICY_ID,
       kind: "baseline_fixed",
-      label: "Fixed Juxta baseline",
-      params: null,
+      label: "Juxta 5.6 (reference)",
+      isJuxtaReference: true,
+      params: {
+        family: "fixed",
+        scanIntervalSeconds: juxtaMainCMode0FixedPolicy.scanIntervalSeconds,
+        scanWindowSeconds: juxtaMainCMode0FixedPolicy.scanWindowSeconds,
+        advIntervalSeconds: juxtaMainCMode0FixedPolicy.advIntervalSeconds
+      },
       meanCaptureRate: 0,
       meanMahPerDay: 0,
       meanBleEfficiency: 0,
       meanRelativeCapture: 1,
       meanRelativeEnergy: 1,
       meanRelativeEfficiency: 1,
-      seedsUsed: 0
+      seedsUsed: 0,
+      isParetoEfficient: false
     };
   }
 
@@ -417,7 +577,8 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
 }
 
 export function buildSweepResultBundle(rawRows: SweepRawRow[], mode: "fast" | "report"): SweepResultBundle {
-  const { summaries, baselineSummary } = aggregateSweepRows(rawRows);
+  const aggregated = aggregateSweepRows(rawRows);
+  const { baselineSummary, summaries } = attachParetoEfficiency(aggregated.baselineSummary, aggregated.summaries);
   const seedsUsed = [...new Set(rawRows.map((row) => row.seed))];
   return {
     rawRows,
@@ -434,10 +595,33 @@ export function finalizeSweepBundle(
 ): SweepResultBundle & { candidates: CandidatePick[] } {
   const bundle = buildSweepResultBundle(rawRows, mode);
   const candidates = pickSweepCandidates(
-    [bundle.baselineSummary, ...bundle.summaries],
+    bundle.baselineSummary,
+    bundle.summaries,
     bundle.baselineSummary.meanCaptureRate
   );
   return { ...bundle, candidates };
+}
+
+/** Build an active policy config for loading a sweep row into the Simulator. */
+export function firmwarePolicyFromSweepSummary(summary: SweepPolicySummary): FirmwarePolicyConfig | null {
+  if (!summary.params) {
+    return null;
+  }
+  if (summary.params.family === "adaptive") {
+    const p = summary.params;
+    const built = sweepAdaptivePolicyFromGrid(p.baselineDrive, p.motionWeight, p.peerWeight, p.tauPeerSeconds);
+    return { ...built, id: summary.policyId, name: summary.label };
+  }
+  const p = summary.params;
+  return {
+    type: "fixed",
+    id: summary.policyId,
+    name: summary.label,
+    scanIntervalSeconds: p.scanIntervalSeconds,
+    scanWindowSeconds: p.scanWindowSeconds,
+    advIntervalSeconds: p.advIntervalSeconds,
+    advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+  };
 }
 
 export function runSingleSweepTrialSync(baseConfig: SimulationConfig, trial: SweepTrial): SweepRawRow {

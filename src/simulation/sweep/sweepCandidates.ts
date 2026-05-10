@@ -1,13 +1,28 @@
-import type { MotionPeerAdaptivePolicyConfig } from "../types";
+export type PolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
 
-export type PolicyKind = "baseline_fixed" | "adaptive";
+/** Discriminated params for Simulate / exports (Juxta baseline uses family fixed). */
+export type SweepPolicyParams =
+  | {
+      family: "adaptive";
+      baselineDrive: number;
+      motionWeight: number;
+      peerWeight: number;
+      tauPeerSeconds: number;
+    }
+  | {
+      family: "fixed";
+      scanIntervalSeconds: number;
+      scanWindowSeconds: number;
+      advIntervalSeconds: number;
+    };
 
 export type SweepPolicySummary = {
   policyId: string;
   kind: PolicyKind;
   label: string;
-  /** Swept parameters; null for baseline. */
-  params: Pick<MotionPeerAdaptivePolicyConfig, "baselineDrive" | "motionWeight" | "peerWeight" | "tauPeerSeconds"> | null;
+  /** True only for the canonical Juxta 5.6 reference row. */
+  isJuxtaReference?: boolean;
+  params: SweepPolicyParams | null;
   /** Mean across seeds (report mode) or single value (fast mode). */
   meanCaptureRate: number;
   meanMahPerDay: number;
@@ -18,107 +33,119 @@ export type SweepPolicySummary = {
   /** Population std (report mode); 0 for single seed. */
   stdCaptureRate?: number;
   seedsUsed: number;
+  /**
+   * Non-dominated on (maximize mean capture, minimize mean mAh/day) among baseline + all sweep summaries.
+   */
+  isParetoEfficient: boolean;
 };
 
 export type CandidatePick = {
-  role: "energySaving" | "balanced" | "highCapture";
+  role: "bestFixed" | "bestAdaptive";
   summary: SweepPolicySummary | null;
   meetsThreshold: boolean;
   note?: string;
 };
 
 const MIN_CAPTURE_FRAC = 0.8;
-const ENERGY_SAVING_MIN_REL_CAPTURE = 0.9;
-const BALANCED_MIN_REL_CAPTURE = 1.0;
-const BALANCED_MAX_REL_ENERGY = 1.15;
 
-function isEligibleForRecommendation(summary: SweepPolicySummary, baselineCapture: number): boolean {
-  if (summary.kind === "baseline_fixed") {
-    return false;
+/**
+ * Pareto frontier on maximize capture, minimize energy (mAh/day).
+ * Policy j dominates i if j has >= capture, <= mAh, with at least one strict improvement.
+ */
+export function computeParetoEfficientPolicyIds(
+  policies: { policyId: string; meanCaptureRate: number; meanMahPerDay: number }[]
+): Set<string> {
+  const ids = new Set<string>();
+  const n = policies.length;
+  for (let i = 0; i < n; i++) {
+    const pi = policies[i]!;
+    let dominated = false;
+    for (let j = 0; j < n; j++) {
+      if (i === j) {
+        continue;
+      }
+      const pj = policies[j]!;
+      const capOk = pj.meanCaptureRate >= pi.meanCaptureRate;
+      const energyOk = pj.meanMahPerDay <= pi.meanMahPerDay;
+      const strictGain =
+        pj.meanCaptureRate > pi.meanCaptureRate || pj.meanMahPerDay < pi.meanMahPerDay;
+      if (capOk && energyOk && strictGain) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) {
+      ids.add(pi.policyId);
+    }
   }
-  return summary.meanCaptureRate >= MIN_CAPTURE_FRAC * baselineCapture;
+  return ids;
 }
 
+export function attachParetoEfficiency(
+  baselineSummary: SweepPolicySummary,
+  summaries: SweepPolicySummary[]
+): { baselineSummary: SweepPolicySummary; summaries: SweepPolicySummary[] } {
+  const combined = [baselineSummary, ...summaries];
+  const paretoIds = computeParetoEfficientPolicyIds(combined);
+  return {
+    baselineSummary: { ...baselineSummary, isParetoEfficient: paretoIds.has(baselineSummary.policyId) },
+    summaries: summaries.map((row) => ({
+      ...row,
+      isParetoEfficient: paretoIds.has(row.policyId)
+    }))
+  };
+}
+
+function bestByEfficiency(policies: SweepPolicySummary[]): SweepPolicySummary | null {
+  if (policies.length === 0) {
+    return null;
+  }
+  return [...policies].sort((a, b) => b.meanBleEfficiency - a.meanBleEfficiency)[0] ?? null;
+}
+
+/**
+ * Mixed sweep recommendations: best fixed-rate (including Juxta 5.6 in the pool) vs best adaptive by mean BLE efficiency.
+ */
 export function pickSweepCandidates(
+  baselineSummary: SweepPolicySummary,
   summaries: SweepPolicySummary[],
   baselineCaptureRate: number
 ): CandidatePick[] {
   const adaptive = summaries.filter((row) => row.kind === "adaptive");
+  const fixedSweep = summaries.filter((row) => row.kind === "fixed_sweep");
 
-  const eligible = adaptive.filter((row) => isEligibleForRecommendation(row, baselineCaptureRate));
+  const fixedPool: SweepPolicySummary[] = [baselineSummary, ...fixedSweep];
+  const bestFixed = bestByEfficiency(fixedPool);
 
-  // Energy-saving: relativeEnergy < 1, relativeCapture >= 0.9, lowest relativeEnergy among those
-  const energySavingStrict = eligible.filter(
-    (row) => row.meanRelativeEnergy < 1 && row.meanRelativeCapture >= ENERGY_SAVING_MIN_REL_CAPTURE
-  );
-  const energySavingFallback = eligible.filter((row) => row.meanRelativeCapture >= ENERGY_SAVING_MIN_REL_CAPTURE);
-  let energySaving: SweepPolicySummary | null = null;
-  let energySavingMeets = false;
-  if (energySavingStrict.length > 0) {
-    energySaving = [...energySavingStrict].sort((a, b) => a.meanRelativeEnergy - b.meanRelativeEnergy)[0] ?? null;
-    energySavingMeets = true;
-  } else if (energySavingFallback.length > 0) {
-    energySaving =
-      [...energySavingFallback].sort((a, b) => a.meanRelativeEnergy - b.meanRelativeEnergy)[0] ?? null;
-    energySavingMeets = false;
-  } else if (eligible.length > 0) {
-    energySaving =
-      [...eligible].sort(
-        (a, b) =>
-          Math.abs(a.meanRelativeCapture - ENERGY_SAVING_MIN_REL_CAPTURE) -
-          Math.abs(b.meanRelativeCapture - ENERGY_SAVING_MIN_REL_CAPTURE)
-      )[0] ?? null;
-    energySavingMeets = false;
-  }
+  const eligibleAdaptive = adaptive.filter((row) => row.meanCaptureRate >= MIN_CAPTURE_FRAC * baselineCaptureRate);
+  const bestAdaptiveEligible = bestByEfficiency(eligibleAdaptive);
+  const bestAdaptiveOverall = bestByEfficiency(adaptive);
 
-  // Balanced: relativeCapture >= 1, relativeEnergy <= 1.15, highest relativeEfficiency
-  const balancedPool = eligible.filter(
-    (row) =>
-      row.meanRelativeCapture >= BALANCED_MIN_REL_CAPTURE && row.meanRelativeEnergy <= BALANCED_MAX_REL_ENERGY
-  );
-  let balanced: SweepPolicySummary | null = null;
-  let balancedMeets = balancedPool.length > 0;
-  if (balancedMeets) {
-    balanced = [...balancedPool].sort((a, b) => b.meanRelativeEfficiency - a.meanRelativeEfficiency)[0] ?? null;
-  } else {
-    const fb = eligible.filter((row) => row.meanRelativeEnergy <= BALANCED_MAX_REL_ENERGY);
-    if (fb.length > 0) {
-      balanced = [...fb].sort((a, b) => b.meanRelativeEfficiency - a.meanRelativeEfficiency)[0] ?? null;
-    } else if (eligible.length > 0) {
-      balanced = [...eligible].sort((a, b) => b.meanRelativeEfficiency - a.meanRelativeEfficiency)[0] ?? null;
-    }
-    balancedMeets = false;
-  }
+  const chosenAdaptive = bestAdaptiveEligible ?? bestAdaptiveOverall;
+  const meetsAdaptiveThreshold = Boolean(bestAdaptiveEligible);
 
-  // High capture: max capture rate (any adaptive)
-  const highCapture =
-    adaptive.length > 0 ? [...adaptive].sort((a, b) => b.meanCaptureRate - a.meanCaptureRate)[0] ?? null : null;
+  const noteFixed =
+    bestFixed && bestFixed.isJuxtaReference
+      ? "Best fixed-rate in this sweep is the Juxta 5.6 reference schedule."
+      : undefined;
 
-  const picks: CandidatePick[] = [
+  const noteAdaptive =
+    !meetsAdaptiveThreshold && bestAdaptiveOverall
+      ? `No adaptive policy reached ${(MIN_CAPTURE_FRAC * 100).toFixed(0)}% of Juxta capture; showing best-efficiency adaptive anyway.`
+      : undefined;
+
+  return [
     {
-      role: "energySaving",
-      summary: energySaving,
-      meetsThreshold: energySavingMeets && Boolean(energySaving),
-      note:
-        energySaving && !energySavingMeets
-          ? "Strict thresholds not met; showing closest policy among eligible or nearest capture target."
-          : undefined
+      role: "bestFixed",
+      summary: bestFixed,
+      meetsThreshold: Boolean(bestFixed),
+      note: noteFixed
     },
     {
-      role: "balanced",
-      summary: balanced,
-      meetsThreshold: balancedMeets && Boolean(balanced),
-      note:
-        balanced && !balancedMeets
-          ? "No policy met relativeCapture ≥ 1.0 and relativeEnergy ≤ 1.15; showing best efficiency among eligible."
-          : undefined
-    },
-    {
-      role: "highCapture",
-      summary: highCapture,
-      meetsThreshold: true
+      role: "bestAdaptive",
+      summary: chosenAdaptive,
+      meetsThreshold: meetsAdaptiveThreshold && Boolean(chosenAdaptive),
+      note: noteAdaptive
     }
   ];
-
-  return picks;
 }

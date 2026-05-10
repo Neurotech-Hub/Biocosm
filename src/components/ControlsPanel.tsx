@@ -162,7 +162,7 @@ export function ControlsPanel({
 
       {onOpenSweepReport ? (
         <button type="button" className="secondary-button sweep-report-shortcut" onClick={onOpenSweepReport}>
-          Open sweep report
+          Open Sweep
         </button>
       ) : null}
 
