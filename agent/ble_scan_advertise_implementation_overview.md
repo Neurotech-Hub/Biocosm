@@ -15,9 +15,9 @@
 | Policy timing written onto collars | [`src/simulation/policies/fixedRate.ts`](../src/simulation/policies/fixedRate.ts), [`src/simulation/policies/adaptive.ts`](../src/simulation/policies/adaptive.ts) |
 | Default intervals / radio model params | [`src/simulation/config.ts`](../src/simulation/config.ts) |
 | UI: BLE and policy controls | [`src/components/ControlsPanel.tsx`](../src/components/ControlsPanel.tsx) |
-| Energy (listen windows + advertising packets) | [`src/simulation/energy.ts`](../src/simulation/energy.ts), [`estimateEventBasedBleEpochMilliampSeconds` in `radio.ts`](../src/simulation/radio.ts) |
+| Energy (baseline × collars, listen RX, µC/adv events) | [`src/simulation/energy.ts`](../src/simulation/energy.ts), [`radio.ts`](../src/simulation/radio.ts) (burst → listen windows / packet grid) |
 | Firmware-minute aggregation (metrics) | [`src/simulation/analysis.ts`](../src/simulation/analysis.ts) (`buildFirmwareMinuteRecords`) |
-| Review feedback reference | [`ble_firmware_vs_simulator_review.md`](ble_firmware_vs_simulator_review.md) |
+| Review feedback (Juxta energy calibration) | [`juxta_ble_energy_model_mismatch_feedback.md`](juxta_ble_energy_model_mismatch_feedback.md) |
 
 ---
 
@@ -54,11 +54,11 @@ Constants in [`radio.ts`](../src/simulation/radio.ts):
 |---------|-------|------|
 | `SCAN_LISTEN_INTERVAL_SECONDS` | 0.05 | spacing of scan sub-windows inside a scan burst |
 | `SCAN_LISTEN_WINDOW_SECONDS` | 0.0125 | duration of each listen window |
-| `ADVERTISING_PACKET_INTERVAL_SECONDS` | 0.15 | spacing of synthetic ad packets (approximation of ~100–200 ms controller interval) |
+| `DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS` | 0.15 | spacing of synthetic ad packets; must match `EnergyConfig.advertisingEventIntervalSeconds` (`ADVERTISING_PACKET_INTERVAL_SECONDS` is a deprecated alias) |
 | `bleScheduling.interBurstDelaySeconds` | 0.1 (default) | gap after a burst before the next scheduling step |
 
 - **Scan:** each `scan` burst is expanded into many short `ScanWindowEvent`s via `createScanListenWindows` (not the whole burst treated as one continuous receiver-on interval at full duty cycle—listen is piecewise).
-- **Advertise:** each `advertise` burst generates discrete `AdvertisingEvent` timestamps at 0.15 s steps (`createAdvertisingEventsFromBursts`).
+- **Advertise:** each `advertise` burst generates discrete `AdvertisingEvent` timestamps using `createAdvertisingEventsFromBursts(bursts, config.energy.advertisingEventIntervalSeconds)` (engine passes energy config).
 
 ---
 
@@ -72,7 +72,7 @@ Constants in [`radio.ts`](../src/simulation/radio.ts):
 4. **RF:** RSSI from path loss + noise, then Bernoulli trial via `detectionProbability(rssi)`.
 5. **At most one** detection per observer–peer **direction** per epoch (`break` after first successful window for that ordered pair).
 
-**Constants** `SCAN_LISTEN_*` and `ADVERTISING_PACKET_INTERVAL_SECONDS` are exported from `radio.ts` for tests and energy accounting.
+**Constants** `SCAN_LISTEN_*` and `DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS` are exported from `radio.ts` for tests and energy accounting.
 
 ### Firmware-shaped minute records
 
@@ -113,9 +113,9 @@ From [`engine.ts`](../src/simulation/engine.ts) (simplified):
 2. `createBleBurstEvents(animals, policyId, epochStart, epochEnd, config.bleScheduling)`.
 3. `applyBurstState`: sets `scanActive` / `advActive` if that animal had any scan vs advertise burst in the epoch (UI / logging).
 4. `computeTrueContacts` at frame time (epoch-end positions).
-5. `simulateBleDetections(animalsAtEpochStart, animalsWithBurstState, …, epochStart, epochEnd, bleBursts)` — distance uses interpolated positions between epoch start and end.
+5. `simulateBleDetections(…, bleBursts, advertisingEventIntervalSeconds)` — distance uses interpolated positions between epoch start and end; advertising times use the same interval as energy.
 6. Scan window logs for metrics combine scan events with which peers were detected in those windows.
-7. `computeEnergyLog`: RX time = count of listen windows × window duration, TX time = advertising packet count × `advChannelsPerEvent` × `txPacketDurationSecondsNominal`, plus CPU overhead on burst wall time, plus steady draw.
+7. `computeEnergyLog`: **one representative collar** (first valid animal): **baseline** `baselineCurrentMicroAmps` × epoch hours; **scan** = RX mA × that collar’s listen-window seconds; **advertising** = packet count × `advEventChargeMicroCoulombs` (`µC / 3_600_000` per mAh), with optional `componentBleActivityScale` on the BLE terms only. **empiricalAverage** uses `measuredSocial5s20sTotalMicroAmps` as total draw minus baseline. See [`juxta_ble_energy_model_mismatch_feedback.md`](juxta_ble_energy_model_mismatch_feedback.md).
 
 ---
 
@@ -124,17 +124,17 @@ From [`engine.ts`](../src/simulation/engine.ts) (simplified):
 In [`ControlsPanel.tsx`](../src/components/ControlsPanel.tsx), **Device / BLE** section:
 
 - **Policy type:** fixed-rate vs motion + peer adaptive.
-- **Detection radius** and **social radius** (ground-truth geometry for contacts and metrics; not radio “range” alone—RSSI model uses distance).
+- **Detection radius** and **social radius** (ground-truth geometry for contacts and metrics; not radio “range” alone—RSSI model uses distance). Defaults are **1 m** each for newer devices (`defaultSimulationConfig.radio` in [`config.ts`](../src/simulation/config.ts)).
 - **Fixed policy** (when selected): scan interval, scan burst duration, advertise interval, **advertise burst duration** (default timings match JUXTA `main.c` mode 0).
 - **Adaptive policy:** exposes motion threshold, peer gain, decay via controls; full adaptive parameter set is in [`config.ts`](../src/simulation/config.ts).
 
-- **Energy / Battery:** assumed **TX power (dBm)** for labeling; battery, voltage, steady current; BLE uses nominal Nordic TX/RX mA with packet/window accounting (see `EnergyConfig`).
+- **Energy / Battery:** TX power (dBm) for labeling; battery, voltage; **baseline µA** per collar; **RX mA** for scan; **advertising event spacing** (must match the synthetic packet grid); **µC/event** for advertising energy; **energy model** (component vs empirical average bench total for 5s/20s). Metrics can warn when the component estimate ≫3× the bench reference for the default Juxta policy.
 
 **Defaults** (from [`config.ts`](../src/simulation/config.ts)):
 
 - Fixed: default is JUXTA mode 0 (`scanIntervalSeconds: 20`, `advIntervalSeconds: 5`, `scanWindowSeconds: 1.5`, `advertisingBurstDurationSeconds: 2`).
-- Energy: Nordic nominal `txPeakCurrentMaAtPlus8Dbm`, `rxCurrentMa1MPhy`, channel count, packet duration, CPU overhead, and `txPowerDbm` prior.
-- Radio: e.g. `detectionRadiusMeters: 1.2`, RSSI path loss + logistic detection curve parameters.
+- Energy: **Juxta v5/6 preset** (`juxtaV56EnergyPreset`): baseline ~78 µA, RX ~6.4 mA, 13 µC/adv event, 0.15 s event spacing, component model, bench total ~233 µA for 5s/20s (`measuredSocial5s20sTotalMicroAmps`).
+- Radio: e.g. `detectionRadiusMeters: 1`, `socialRadiusMeters: 1`, RSSI path loss + logistic detection curve parameters.
 
 Species / biology controls are separate and do **not** change BLE timing except indirectly if you add future coupling (currently they do not).
 

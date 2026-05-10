@@ -1,10 +1,18 @@
 import {
   countAdvertisingPacketsInBursts,
   countScanListenWindowsInBursts,
-  estimateEventBasedBleEpochMilliampSeconds,
-  totalBleBurstWallSeconds
+  totalBleBurstWallSeconds,
+  totalScanListenWindowSeconds
 } from "./radio";
 import type { BleBurstEvent, EnergyConfig, EnergyLog } from "./types";
+
+/** 1 mAh = 1 mA × 1 h = 3.6 C = 3_600_000 µC */
+export const MICROCOULOMBS_PER_MILLIAMP_HOUR = 3_600_000;
+
+/** mAh = (µA × seconds) / 3_600_000 */
+function microAmpSecondsToMilliampHours(microAmps: number, seconds: number): number {
+  return (microAmps * seconds) / 3_600_000;
+}
 
 export function computeEnergyLog(
   time: number,
@@ -13,11 +21,26 @@ export function computeEnergyLog(
   config: EnergyConfig,
   previousCumulativeMah = 0
 ): EnergyLog {
-  const { steadyMah, scanMah, advertisingMah } = estimateEventBasedBleEpochMilliampSeconds(
-    bursts,
-    epochSeconds,
-    config
-  );
+  const interval = config.advertisingEventIntervalSeconds;
+  /** One representative collar — see `energyBurstsForRepresentativeCollar` in engine. */
+  const steadyMah = microAmpSecondsToMilliampHours(config.baselineCurrentMicroAmps, epochSeconds);
+
+  let scanMah: number;
+  let advertisingMah: number;
+
+  if (config.energyModel === "empiricalAverage") {
+    const totalFromBenchMah = microAmpSecondsToMilliampHours(config.measuredSocial5s20sTotalMicroAmps, epochSeconds);
+    advertisingMah = Math.max(0, totalFromBenchMah - steadyMah);
+    scanMah = 0;
+  } else {
+    const bleScale = config.componentBleActivityScale ?? 1;
+    const listenSeconds = totalScanListenWindowSeconds(bursts);
+    scanMah = ((listenSeconds * config.rxCurrentMa1MPhy) / 3600) * bleScale;
+    const advPackets = countAdvertisingPacketsInBursts(bursts, interval);
+    advertisingMah =
+      ((advPackets * config.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) * bleScale;
+  }
+
   const totalMah = steadyMah + scanMah + advertisingMah;
   const cumulativeMah = previousCumulativeMah + totalMah;
   const remainingMah = Math.max(0, config.batteryCapacityMah - cumulativeMah);
@@ -37,7 +60,10 @@ export function computeEnergyLog(
 }
 
 /** Exported for tests comparing scheduling across epoch lengths. */
-export function energyDiagnostics(bursts: BleBurstEvent[]): {
+export function energyDiagnostics(
+  bursts: BleBurstEvent[],
+  advertisingEventIntervalSeconds: number
+): {
   scanListenWindowCount: number;
   advertisingPacketCount: number;
   scanBurstWallSeconds: number;
@@ -45,7 +71,7 @@ export function energyDiagnostics(bursts: BleBurstEvent[]): {
 } {
   return {
     scanListenWindowCount: countScanListenWindowsInBursts(bursts),
-    advertisingPacketCount: countAdvertisingPacketsInBursts(bursts),
+    advertisingPacketCount: countAdvertisingPacketsInBursts(bursts, advertisingEventIntervalSeconds),
     scanBurstWallSeconds: totalBleBurstWallSeconds(bursts, "scan"),
     advertisingBurstWallSeconds: totalBleBurstWallSeconds(bursts, "advertise")
   };

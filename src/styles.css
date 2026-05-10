@@ -342,6 +342,98 @@ input[type="range"] {
   font-size: 1.25rem;
 }
 
+.time-series-panel-title {
+  margin-bottom: 4px;
+}
+
+.time-series-panel-charts {
+  display: grid;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.time-series-chart-card {
+  background: #0d1620;
+  border: 1px solid #223245;
+  border-radius: 14px;
+  padding: 14px 16px 12px;
+}
+
+.time-series-chart-card .chart-card-title {
+  margin: 0 0 10px;
+}
+
+.time-series-chart-card .strip-chart {
+  margin-bottom: 6px;
+}
+
+.time-series-chart-card .strip-chart-legend {
+  margin-bottom: 0;
+  margin-top: 2px;
+}
+
+.time-series-chart-card .chart-legend {
+  margin-top: 6px;
+}
+
+.chart-subtitle {
+  color: #90a4b8;
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 14px 0 8px;
+}
+
+.strip-chart {
+  margin-bottom: 4px;
+}
+
+.strip-chart-legend {
+  margin-bottom: 10px;
+}
+
+.strip-dot {
+  stroke: none;
+}
+
+.strip-dot-social {
+  fill: #67d2ff;
+}
+
+.strip-dot-sleep {
+  fill: #8b96a3;
+}
+
+.strip-dot-awake {
+  fill: #f0f6fc;
+}
+
+.strip-dot-move {
+  fill: #72e6ac;
+}
+
+.strip-legend-dot {
+  border-radius: 50%;
+  flex-shrink: 0;
+  height: 8px;
+  width: 8px;
+}
+
+.strip-legend-dot.strip-dot-social {
+  background: #67d2ff;
+}
+
+.strip-legend-dot.strip-dot-sleep {
+  background: #8b96a3;
+}
+
+.strip-legend-dot.strip-dot-awake {
+  background: #f0f6fc;
+}
+
+.strip-legend-dot.strip-dot-move {
+  background: #72e6ac;
+}
+
 .time-series-chart {
   display: block;
   width: 100%;
@@ -397,6 +489,19 @@ input[type="range"] {
   text-anchor: middle;
 }
 
+.chart-axis-time-of-day {
+  fill: #d6e2ef;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chart-axis-elapsed {
+  fill: rgba(141, 164, 184, 0.72);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
 .chart-legend {
   align-items: center;
   color: #b7c8d8;
@@ -438,10 +543,28 @@ input[type="range"] {
   height: 4px;
 }
 
-.metric-grid {
+.metric-sections {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.metric-section {
+  background: #0d1620;
+  border: 1px solid #223245;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.metrics-section-title {
+  color: #d6e2ef;
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+}
+
+.metric-section .metric-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .legend-grid {
@@ -534,7 +657,7 @@ input[type="range"] {
 }
 
 .metric-card {
-  background: #0d1620;
+  background: #121b26;
   border: 1px solid #223245;
   border-radius: 14px;
   padding: 12px;

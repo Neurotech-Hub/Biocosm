@@ -10,7 +10,7 @@ import {
   createScanWindowEventsFromBursts,
   simulateBleDetections
 } from "./radio";
-import { arriveAtNode, chooseBehaviorState, chooseNextEdge, enterEdge } from "./world";
+import { arriveAtNode, behaviorStateFromSchedule, chooseBehaviorState, chooseNextEdge, enterEdge } from "./world";
 import type {
   Animal,
   AnimalObservation,
@@ -60,9 +60,11 @@ export function stepSimulation(state: SimulationState): SimulationState {
     state.config.bleScheduling
   );
   const animalsWithBurstState = applyBurstState(animalsWithPolicy, bleBursts);
+  const energyBursts = energyBurstsForRepresentativeCollar(animalsWithBurstState, bleBursts);
+  const advInterval = state.config.energy.advertisingEventIntervalSeconds;
   const trueContacts = computeTrueContacts(animalsWithBurstState, state.config.radio, time);
   const scanWindowEvents = createScanWindowEventsFromBursts(bleBursts);
-  const advertisingEvents = createAdvertisingEventsFromBursts(bleBursts);
+  const advertisingEvents = createAdvertisingEventsFromBursts(bleBursts, advInterval);
   const detections = simulateBleDetections(
     animalsAtEpochStart,
     animalsWithBurstState,
@@ -71,10 +73,11 @@ export function stepSimulation(state: SimulationState): SimulationState {
     epochStart,
     time,
     rng,
-    bleBursts
+    bleBursts,
+    advInterval
   );
   const scanWindows = createScanWindowLogs(scanWindowEvents, detections);
-  const energy = computeEnergyLog(time, dtSeconds, bleBursts, state.config.energy, state.energy.cumulativeMah);
+  const energy = computeEnergyLog(time, dtSeconds, energyBursts, state.config.energy, state.energy.cumulativeMah);
   const frameLogs = {
     animalStates: createAnimalStateLogs(time, animalsWithBurstState, observations),
     trueDyads: createTrueDyadLogs(trueContacts, animalsWithBurstState),
@@ -124,6 +127,14 @@ export function mergeLogs(left: SimulationState["logs"], right: SimulationState[
   };
 }
 
+function energyBurstsForRepresentativeCollar(animals: Animal[], bursts: BleBurstEvent[]): BleBurstEvent[] {
+  const rep = animals.find((animal) => animal.collar.valid) ?? animals[0];
+  if (!rep) {
+    return [];
+  }
+  return bursts.filter((burst) => burst.animalId === rep.id);
+}
+
 function applyBurstState(animals: Animal[], bursts: BleBurstEvent[]): Animal[] {
   return animals.map((animal) => {
     const animalBursts = bursts.filter((burst) => burst.animalId === animal.id);
@@ -154,7 +165,14 @@ function updateAnimalPositions(
   return animals.map((animal) => {
     let nextAnimal = animal;
     const boutRemainingSeconds = animal.boutRemainingSeconds - dtSeconds;
-    if (boutRemainingSeconds <= 0) {
+    if (animal.behaviorSchedule.length > 0) {
+      const nextState = behaviorStateFromSchedule(animal.behaviorSchedule, time);
+      nextAnimal = {
+        ...nextAnimal,
+        state: nextState,
+        boutRemainingSeconds: secondsUntilScheduleChange(animal, time)
+      };
+    } else if (boutRemainingSeconds <= 0) {
       const nextState = chooseBehaviorState(time, animal, state.config.behavior, rng);
       nextAnimal = {
         ...nextAnimal,
@@ -208,6 +226,13 @@ function boutLengthSeconds(state: Animal["state"], animal: Animal, rng: SeededRa
     return Math.max(120, rng.triangular(120, animal.traits.restBoutMeanMinutes * 60, animal.traits.restBoutMeanMinutes * 180));
   }
   return Math.max(60, rng.triangular(60, animal.traits.stationaryAwakeBoutMeanMinutes * 60, animal.traits.stationaryAwakeBoutMeanMinutes * 180));
+}
+
+function secondsUntilScheduleChange(animal: Animal, timeSeconds: number): number {
+  const segment = animal.behaviorSchedule.find(
+    (row) => timeSeconds >= row.startTimeSeconds && timeSeconds < row.endTimeSeconds
+  );
+  return Math.max(0, (segment?.endTimeSeconds ?? timeSeconds) - timeSeconds);
 }
 
 function createScanWindowLogs(scanWindowEvents: ScanWindowEvent[], detections: DetectionEvent[]): ScanWindowLog[] {

@@ -162,6 +162,14 @@ function drawAnimalLine(
 }
 
 function drawAnimals(context: CanvasRenderingContext2D, state: SimulationState, projection: Projection): void {
+  const labelAngleById = stableLabelAngleByAnimalId(state.animals);
+
+  context.save();
+  context.fillStyle = "#d6e2ef";
+  context.font = `${projection.labelFontSize}px system-ui`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
   for (const animal of state.animals) {
     const point = projection.toScreen(animal.position.x, animal.position.y);
     const animalRadius = projection.animalRadius;
@@ -173,10 +181,29 @@ function drawAnimals(context: CanvasRenderingContext2D, state: SimulationState, 
     context.fill();
     context.globalAlpha = 1;
 
+    const angle = labelAngleById.get(animal.id) ?? -Math.PI / 2;
+    const labelRadius = animalRadius + projection.labelFontSize * 0.9;
+    const labelX = point.x + labelRadius * Math.cos(angle);
+    const labelY = point.y + labelRadius * Math.sin(angle);
+
     context.fillStyle = "#d6e2ef";
-    context.font = `${projection.labelFontSize}px system-ui`;
-    context.fillText(animal.id.replace("animal-", "A"), point.x + animalRadius + 2, point.y - animalRadius);
+    context.fillText(animal.id.replace("animal-", "A"), labelX, labelY);
   }
+  context.restore();
+}
+
+/** Fixed angle per animal (sorted id × 2π / N) so labels do not jump when co-location sets change size. */
+function stableLabelAngleByAnimalId(animals: SimulationState["animals"]): Map<string, number> {
+  const sorted = [...animals].sort((a, b) => a.id.localeCompare(b.id));
+  const n = sorted.length;
+  const map = new Map<string, number>();
+  if (n === 0) {
+    return map;
+  }
+  for (let i = 0; i < n; i++) {
+    map.set(sorted[i].id, -Math.PI / 2 + (i / n) * 2 * Math.PI);
+  }
+  return map;
 }
 
 function drawSamplingIndicators(
@@ -193,8 +220,10 @@ function drawSamplingIndicators(
       context.beginPath();
       context.strokeStyle = "rgba(125, 211, 252, 0.8)";
       context.lineWidth = projection.samplingIndicatorWidth;
+      context.setLineDash([5, 4]);
       context.arc(point.x, point.y, projection.animalRadius + 6 * projection.samplingVisualScale, 0, Math.PI * 2);
       context.stroke();
+      context.setLineDash([]);
     }
 
     if (detectedAdvertiserIds.has(animal.id)) {

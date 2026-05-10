@@ -1,6 +1,13 @@
 import { defaultSimulationConfig } from "./config";
 import { runSimulation, stepSimulation } from "./engine";
-import { buildTimeSeries, isLightPhase } from "./timeSeries";
+import {
+  buildAnimalStripEvents,
+  buildTimeSeries,
+  decimateMovementStripEvents,
+  isLightPhase,
+  type AnimalStripEvent
+} from "./timeSeries";
+import type { SimulationLogs } from "./types";
 import { createInitialSimulation } from "./world";
 
 describe("time series helpers", () => {
@@ -27,9 +34,61 @@ describe("time series helpers", () => {
     expect(points[2].absoluteTime).toBe(defaultSimulationConfig.startTimeSeconds + second.time);
   });
 
+  it("decimates movement strip events to a fixed cap per animal", () => {
+    const many: AnimalStripEvent[] = [];
+    for (let t = 0; t < 5000; t++) {
+      many.push({ time: t, animalId: "animal-1", kind: t % 120 === 0 ? "sleep" : "awake" });
+    }
+    const decimated = decimateMovementStripEvents(many, 50);
+    expect(decimated.length).toBe(50);
+    expect(decimated[0].time).toBe(0);
+    expect(decimated.at(-1)?.time).toBe(4999);
+
+    const twoAnimals: AnimalStripEvent[] = [
+      ...many,
+      ...many.map((e) => ({ ...e, animalId: "animal-2" }))
+    ];
+    expect(decimateMovementStripEvents(twoAnimals, 50)).toHaveLength(100);
+  });
+
+  it("includes awake stationary rows in animal strip events", () => {
+    const logs: SimulationLogs = {
+      animalStates: [
+        stateLog("animal-1", 60, "sleeping"),
+        stateLog("animal-1", 120, "awake_stationary"),
+        stateLog("animal-1", 180, "moving")
+      ],
+      trueDyads: [
+        {
+          time: 240,
+          animalA: "animal-1",
+          animalB: "animal-2",
+          distance: 0.4,
+          withinDetectionRadius: true,
+          withinSocialRadius: true,
+          bothCollarsValid: true
+        }
+      ],
+      detections: [],
+      bleBursts: [],
+      scanWindows: [],
+      collarStates: [],
+      energy: []
+    };
+
+    expect(buildAnimalStripEvents(logs)).toEqual([
+      { time: 60, animalId: "animal-1", kind: "sleep" },
+      { time: 120, animalId: "animal-1", kind: "awake" },
+      { time: 180, animalId: "animal-1", kind: "move" },
+      { time: 240, animalId: "animal-1", kind: "social" },
+      { time: 240, animalId: "animal-2", kind: "social" }
+    ]);
+  });
+
   it("shows higher movement during the dark phase for nocturnal animals", () => {
     const config = {
       ...defaultSimulationConfig,
+      speciesPresetId: "lab_mouse",
       seed: "circadian-profile",
       startTimeSeconds: 0,
       simulationLengthSeconds: 24 * 3600,
@@ -61,4 +120,17 @@ describe("time series helpers", () => {
 
 function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function stateLog(animalId: string, time: number, behavioralState: "sleeping" | "awake_stationary" | "moving") {
+  return {
+    time,
+    animalId,
+    x: 0,
+    y: 0,
+    behavioralState,
+    trueSpeed: behavioralState === "moving" ? 1 : 0,
+    motionDetected: behavioralState === "moving",
+    sleeping: behavioralState === "sleeping"
+  };
 }

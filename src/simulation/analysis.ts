@@ -1,5 +1,43 @@
 import { pairKey } from "./geometry";
-import type { DetectionEvent, FirmwareMinuteRecord, SimulationLogs, SimulationMetrics, SimulationState } from "./types";
+import type {
+  DetectionEvent,
+  FirmwareMinuteRecord,
+  SimulationLogs,
+  SimulationMetrics,
+  SimulationState
+} from "./types";
+
+function isJuxtaMaincSocialFixedPolicy(policy: SimulationState["config"]["activePolicy"]): boolean {
+  if (policy.type !== "fixed") {
+    return false;
+  }
+  return (
+    policy.scanIntervalSeconds === 20 &&
+    policy.advIntervalSeconds === 5 &&
+    policy.scanWindowSeconds === 1.5 &&
+    (policy.advertisingBurstDurationSeconds ?? 2) === 2
+  );
+}
+
+function energyModelWarningFor(
+  state: SimulationState,
+  meanEnergyCurrentMicroAmpsPerCollar: number
+): string | undefined {
+  const { energy, activePolicy } = state.config;
+  if (energy.energyModel !== "component") {
+    return undefined;
+  }
+  if (!isJuxtaMaincSocialFixedPolicy(activePolicy)) {
+    return undefined;
+  }
+  if (state.time < 60) {
+    return undefined;
+  }
+  if (meanEnergyCurrentMicroAmpsPerCollar > 3 * energy.measuredSocial5s20sTotalMicroAmps) {
+    return "Predicted draw is more than 3× the Juxta 5s/20s bench reference — check for burst-wall × TX-style double counting or a policy mismatch.";
+  }
+  return undefined;
+}
 
 export function buildFirmwareMinuteRecords(
   detections: DetectionEvent[],
@@ -42,20 +80,27 @@ export function computeMetrics(state: SimulationState, logs: SimulationLogs = st
   const animalCount = Math.max(1, state.animals.length);
   const capture = computeBleCapture(state, logs);
   const latestEnergy = logs.energy.at(-1) ?? state.energy;
+  const elapsedHours = state.time / 3600;
+  const meanEnergyCurrentMicroAmpsPerCollar =
+    elapsedHours > 1e-9 ? (latestEnergy.cumulativeMah / elapsedHours) * 1000 : 0;
+  const energyModelWarning = energyModelWarningFor(state, meanEnergyCurrentMicroAmpsPerCollar);
   return {
     ...logMetrics,
     bleCaptureRate: capture.opportunities > 0 ? capture.hits / capture.opportunities : 0,
     bleCaptureHits: capture.hits,
     bleCaptureOpportunities: capture.opportunities,
     scanningAnimals: new Set(logs.bleBursts.filter((burst) => burst.kind === "scan").map((burst) => burst.animalId)).size,
-    advertisingAnimals: new Set(logs.bleBursts.filter((burst) => burst.kind === "advertise").map((burst) => burst.animalId)).size,
+    advertisingAnimals: new Set(logs.bleBursts.filter((burst) => burst.kind === "advertise").map((burst) => burst.animalId))
+      .size,
     meanSamplingDrive: state.animals.reduce((sum, animal) => sum + animal.collar.samplingDrive, 0) / animalCount,
     meanScanIntervalSeconds:
       state.animals.reduce((sum, animal) => sum + animal.collar.scanIntervalSeconds, 0) / animalCount,
     energyUsedMah: latestEnergy.cumulativeMah,
+    meanEnergyCurrentMicroAmpsPerCollar,
     batteryRemainingPercent: latestEnergy.remainingPercent,
     estimatedVoltage: latestEnergy.estimatedVoltage,
-    capturePerMah: latestEnergy.cumulativeMah > 0 ? capture.hits / latestEnergy.cumulativeMah : 0
+    capturePerMah: latestEnergy.cumulativeMah > 0 ? capture.hits / latestEnergy.cumulativeMah : 0,
+    energyModelWarning
   };
 }
 
@@ -89,9 +134,11 @@ export function computeMetricsFromLogs(
     meanSamplingDrive: 0,
     meanScanIntervalSeconds: 0,
     energyUsedMah: logs.energy.at(-1)?.cumulativeMah ?? 0,
+    meanEnergyCurrentMicroAmpsPerCollar: 0,
     batteryRemainingPercent: logs.energy.at(-1)?.remainingPercent ?? 1,
     estimatedVoltage: logs.energy.at(-1)?.estimatedVoltage ?? 0,
-    capturePerMah: 0
+    capturePerMah: 0,
+    energyModelWarning: undefined
   };
 }
 

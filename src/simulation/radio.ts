@@ -6,7 +6,6 @@ import type {
   BleBurstEvent,
   BleSchedulingConfig,
   DetectionEvent,
-  EnergyConfig,
   RadioConfig,
   ScanWindowEvent,
   TrueContact
@@ -16,7 +15,10 @@ export const scanBurstDurationSeconds = 1.5;
 export const interBurstDelaySeconds = 0.1;
 export const SCAN_LISTEN_INTERVAL_SECONDS = 0.05;
 export const SCAN_LISTEN_WINDOW_SECONDS = 0.0125;
-export const ADVERTISING_PACKET_INTERVAL_SECONDS = 0.15;
+/** Default spacing of synthetic advertising events; keep aligned with `EnergyConfig.advertisingEventIntervalSeconds`. */
+export const DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS = 0.15;
+/** @deprecated Use DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS or config. */
+export const ADVERTISING_PACKET_INTERVAL_SECONDS = DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS;
 
 export function computeTrueContacts(animals: Animal[], radio: RadioConfig, time: number): TrueContact[] {
   const contacts: TrueContact[] = [];
@@ -44,13 +46,14 @@ export function simulateBleDetections(
   epochStart: number,
   epochEnd: number,
   rng: SeededRandom,
-  bleBursts?: BleBurstEvent[]
+  bleBursts?: BleBurstEvent[],
+  advertisingEventIntervalSeconds: number = DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS
 ): DetectionEvent[] {
   const startById = new Map(animalsStart.map((animal) => [animal.id, animal]));
   const bursts =
     bleBursts ?? createBleBurstEvents(animalsEnd, policyId, epochStart, epochEnd, defaultSchedulingFallback());
   const windows = createScanListenWindows(bursts);
-  const ads = createAdvertisingEventsFromBursts(bursts);
+  const ads = createAdvertisingEventsFromBursts(bursts, advertisingEventIntervalSeconds);
   const windowsByObserver = groupScanWindowsByObserver(windows);
   const adsByAnimal = groupAdvertisingEventsByAnimal(ads);
   const events: DetectionEvent[] = [];
@@ -225,7 +228,10 @@ export function createAdvertisingEvents(
 ): AdvertisingEvent[] {
   void radioStepSeconds;
   const sched = scheduling ?? defaultSchedulingFallback();
-  return createAdvertisingEventsFromBursts(createBleBurstEvents(animals, "", epochStart, epochEnd, sched));
+  return createAdvertisingEventsFromBursts(
+    createBleBurstEvents(animals, "", epochStart, epochEnd, sched),
+    DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS
+  );
 }
 
 export function createScanWindowEventsFromBursts(bursts: BleBurstEvent[]): ScanWindowEvent[] {
@@ -239,14 +245,17 @@ export function createScanWindowEventsFromBursts(bursts: BleBurstEvent[]): ScanW
     }));
 }
 
-export function createAdvertisingEventsFromBursts(bursts: BleBurstEvent[]): AdvertisingEvent[] {
+export function createAdvertisingEventsFromBursts(
+  bursts: BleBurstEvent[],
+  advertisingEventIntervalSeconds: number = DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS
+): AdvertisingEvent[] {
   return bursts.flatMap((burst) => {
     if (burst.kind !== "advertise") {
       return [];
     }
 
     const packets: AdvertisingEvent[] = [];
-    for (let time = burst.startTime; time <= burst.endTime; time += ADVERTISING_PACKET_INTERVAL_SECONDS) {
+    for (let time = burst.startTime; time <= burst.endTime; time += advertisingEventIntervalSeconds) {
       packets.push({ time, animalId: burst.animalId });
     }
     return packets;
@@ -270,13 +279,16 @@ export function totalScanListenWindowSeconds(bursts: BleBurstEvent[]): number {
   return countScanListenWindowsInBursts(bursts) * SCAN_LISTEN_WINDOW_SECONDS;
 }
 
-export function countAdvertisingPacketsInBursts(bursts: BleBurstEvent[]): number {
+export function countAdvertisingPacketsInBursts(
+  bursts: BleBurstEvent[],
+  advertisingEventIntervalSeconds: number = DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS
+): number {
   let count = 0;
   for (const burst of bursts) {
     if (burst.kind !== "advertise") {
       continue;
     }
-    for (let time = burst.startTime; time <= burst.endTime; time += ADVERTISING_PACKET_INTERVAL_SECONDS) {
+    for (let time = burst.startTime; time <= burst.endTime; time += advertisingEventIntervalSeconds) {
       count += 1;
     }
   }
@@ -287,28 +299,6 @@ export function totalBleBurstWallSeconds(bursts: BleBurstEvent[], kind: BleBurst
   return bursts
     .filter((burst) => burst.kind === kind)
     .reduce((sum, burst) => sum + Math.max(0, burst.endTime - burst.startTime), 0);
-}
-
-export function estimateEventBasedBleEpochMilliampSeconds(
-  bursts: BleBurstEvent[],
-  epochSeconds: number,
-  config: EnergyConfig
-): { steadyMah: number; scanMah: number; advertisingMah: number } {
-  const steadyMah = config.steadyCurrentMa * (epochSeconds / 3600);
-  const listenSeconds = totalScanListenWindowSeconds(bursts);
-  const scanWallSeconds = totalBleBurstWallSeconds(bursts, "scan");
-  const advWallSeconds = totalBleBurstWallSeconds(bursts, "advertise");
-  const scanRxMah = (listenSeconds * config.rxCurrentMa1MPhy) / 3600;
-  const scanCpuMah = (scanWallSeconds * config.cpuActiveOverheadDuringBleMa) / 3600;
-  const scanMah = scanRxMah + scanCpuMah;
-
-  const advPackets = countAdvertisingPacketsInBursts(bursts);
-  const advTxSeconds = advPackets * config.advChannelsPerEvent * config.txPacketDurationSecondsNominal;
-  const advTxMah = (advTxSeconds * config.txPeakCurrentMaAtPlus8Dbm) / 3600;
-  const advCpuMah = (advWallSeconds * config.cpuActiveOverheadDuringBleMa) / 3600;
-  const advertisingMah = advTxMah + advCpuMah;
-
-  return { steadyMah, scanMah, advertisingMah };
 }
 
 function createScanListenWindows(bursts: BleBurstEvent[]): ScanWindowEvent[] {

@@ -7,6 +7,7 @@ import type {
   AnimalState,
   AnimalTraits,
   BehaviorConfig,
+  BehaviorSegment,
   PathEdge,
   PathGraph,
   PathNode,
@@ -18,9 +19,10 @@ import type {
 export function createInitialSimulation(config: SimulationConfig): SimulationState {
   const rng = new SeededRandom(config.seed);
   const pathGraph = createPathGraph(config, rng);
-  const animals = Array.from({ length: config.animalCount }, (_, index) =>
+  const animalsWithoutSchedules = Array.from({ length: config.animalCount }, (_, index) =>
     createAnimal(index, pathGraph, config, rng)
   );
+  const animals = buildValidatedBehaviorSchedules(animalsWithoutSchedules, config);
 
   return {
     time: 0,
@@ -205,7 +207,8 @@ function createAnimal(
       lastAdvTime: advPhaseOffsetSeconds - policyTiming.advIntervalSeconds
     },
     boutRemainingSeconds: initialBoutRemainingSeconds(initialState, traits, rng),
-    recentNodeIds: [startNode.id]
+    recentNodeIds: [startNode.id],
+    behaviorSchedule: []
   };
 }
 
@@ -244,6 +247,263 @@ export function createTraits(id: string, config: SimulationConfig, rng: SeededRa
     ultradianPeriodMinutes: preset.ultradianPeriodMinutes ? sampleTrait(preset.ultradianPeriodMinutes, rng) : undefined,
     ultradianAmplitude: preset.ultradianAmplitude
   };
+}
+
+type ScheduleCandidate = {
+  segments: BehaviorSegment[];
+  states: AnimalState[];
+  movingSteps: number;
+  sleepingSteps: number;
+  awakeSteps: number;
+  score: number;
+};
+
+function buildValidatedBehaviorSchedules(animals: Animal[], config: SimulationConfig): Animal[] {
+  const groupAttempts = config.speciesPresetId === "human" ? 30 : 1;
+  let bestAnimals = animals;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let attempt = 0; attempt < groupAttempts; attempt++) {
+    const scheduled = animals.map((animal) => {
+      const candidate = bestScheduleForAnimal(animal, config, attempt);
+      return {
+        ...animal,
+        state: behaviorStateFromSchedule(candidate.segments, config.startTimeSeconds),
+        boutRemainingSeconds: secondsUntilScheduleChange(candidate.segments, config.startTimeSeconds),
+        behaviorSchedule: candidate.segments
+      };
+    });
+    const score = groupScheduleScore(scheduled, config);
+    if (score < bestScore) {
+      bestAnimals = scheduled;
+      bestScore = score;
+    }
+    if (score === 0) {
+      return scheduled;
+    }
+  }
+
+  return bestAnimals;
+}
+
+function bestScheduleForAnimal(animal: Animal, config: SimulationConfig, groupAttempt: number): ScheduleCandidate {
+  const attempts = 50;
+  let best: ScheduleCandidate | undefined;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const rng = new SeededRandom(`${config.seed}:schedule:${groupAttempt}:${attempt}:${animal.id}`);
+    const candidate = generateScheduleCandidate(animal.traits, config, rng);
+    if (!best || candidate.score < best.score) {
+      best = candidate;
+    }
+    if (candidate.score === 0) {
+      return candidate;
+    }
+  }
+
+  return best ?? generateScheduleCandidate(animal.traits, config, new SeededRandom(`${config.seed}:schedule:fallback:${animal.id}`));
+}
+
+function generateScheduleCandidate(
+  traits: AnimalTraits,
+  config: SimulationConfig,
+  rng: SeededRandom
+): ScheduleCandidate {
+  const stepSeconds = config.timeStepSeconds;
+  const stepCount = Math.max(1, Math.ceil(config.simulationLengthSeconds / stepSeconds));
+  const scale = config.simulationLengthSeconds / (24 * 3600);
+  const requiresAwake = traits.stationaryAwakeBoutMeanMinutes > 0;
+  const minAwakeSteps = requiresAwake ? Math.max(1, Math.round(Math.min(90, traits.stationaryAwakeBoutMeanMinutes) * 60 / stepSeconds)) : 0;
+  const sleepTarget = clamp(
+    Math.round((traits.majorRestWindowHours * 3600 * scale) / stepSeconds),
+    0,
+    Math.max(0, stepCount - minAwakeSteps)
+  );
+  const moveTarget = clamp(
+    Math.round((traits.dailyMotionMinutes * 60 * scale) / stepSeconds),
+    0,
+    Math.max(0, stepCount - sleepTarget - minAwakeSteps)
+  );
+  const states: AnimalState[] = Array.from({ length: stepCount }, () => "awake_stationary");
+  const available = new Set(Array.from({ length: stepCount }, (_, index) => index));
+
+  for (const index of chooseSleepSteps(traits, config, stepCount, sleepTarget, rng)) {
+    states[index] = "sleeping";
+    available.delete(index);
+  }
+
+  const movingSteps = chooseWeightedSteps(
+    [...available],
+    moveTarget,
+    (index) => activityWeightForStep(index, traits, config),
+    rng
+  );
+  for (const index of movingSteps) {
+    states[index] = "moving";
+  }
+
+  const counts = countStates(states);
+  return {
+    segments: statesToSegments(states, config.startTimeSeconds, stepSeconds),
+    states,
+    ...counts,
+    score: animalScheduleScore(counts, moveTarget, sleepTarget, minAwakeSteps)
+  };
+}
+
+function chooseSleepSteps(
+  traits: AnimalTraits,
+  config: SimulationConfig,
+  stepCount: number,
+  target: number,
+  rng: SeededRandom
+): number[] {
+  if (target <= 0) {
+    return [];
+  }
+  if (traits.sleepArchitecture === "monophasic" || traits.sleepCenterHour !== undefined) {
+    const centerSeconds = (traits.sleepCenterHour ?? 0) * 3600 - traits.circadianPhaseOffsetHours * 3600;
+    const jitterSeconds = rng.range(-0.75 * 3600, 0.75 * 3600);
+    const center = circularSeconds(centerSeconds + jitterSeconds);
+    const start = center - (target * config.timeStepSeconds) / 2;
+    const ranked = Array.from({ length: stepCount }, (_, index) => ({
+      index,
+      distance: circularSecondDistance(stepMidpointSeconds(index, config), start + (target * config.timeStepSeconds) / 2)
+    })).sort((a, b) => a.distance - b.distance);
+    return ranked.slice(0, target).map((row) => row.index);
+  }
+
+  return chooseWeightedSteps(
+    Array.from({ length: stepCount }, (_, index) => index),
+    target,
+    (index) => restWeightForStep(index, traits, config),
+    rng
+  );
+}
+
+function chooseWeightedSteps(
+  indexes: number[],
+  count: number,
+  weightForIndex: (index: number) => number,
+  rng: SeededRandom
+): number[] {
+  return indexes
+    .map((index) => ({
+      index,
+      score: -Math.log(Math.max(Number.EPSILON, rng.next())) / Math.max(0.001, weightForIndex(index))
+    }))
+    .sort((a, b) => a.score - b.score)
+    .slice(0, count)
+    .map((row) => row.index);
+}
+
+function activityWeightForStep(index: number, traits: AnimalTraits, config: SimulationConfig): number {
+  const timeSeconds = stepMidpointSeconds(index, config);
+  const hour = ((timeSeconds / 3600 + traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
+  return Math.max(0.001, combinedActivityDrive(timeSeconds, hour, traits, config.behavior));
+}
+
+function restWeightForStep(index: number, traits: AnimalTraits, config: SimulationConfig): number {
+  const timeSeconds = stepMidpointSeconds(index, config);
+  const hour = ((timeSeconds / 3600 + traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
+  return Math.max(0.001, restKernel(hour, traits, config.behavior));
+}
+
+function stepMidpointSeconds(index: number, config: SimulationConfig): number {
+  return config.startTimeSeconds + (index + 0.5) * config.timeStepSeconds;
+}
+
+function countStates(states: AnimalState[]): Pick<ScheduleCandidate, "movingSteps" | "sleepingSteps" | "awakeSteps"> {
+  return {
+    movingSteps: states.filter((state) => state === "moving").length,
+    sleepingSteps: states.filter((state) => state === "sleeping").length,
+    awakeSteps: states.filter((state) => state === "awake_stationary").length
+  };
+}
+
+function animalScheduleScore(
+  counts: Pick<ScheduleCandidate, "movingSteps" | "sleepingSteps" | "awakeSteps">,
+  moveTarget: number,
+  sleepTarget: number,
+  minAwakeSteps: number
+): number {
+  const moveTolerance = Math.max(2, Math.ceil(moveTarget * 0.12));
+  const sleepTolerance = Math.max(2, Math.ceil(sleepTarget * 0.12));
+  const moveMiss = Math.max(0, Math.abs(counts.movingSteps - moveTarget) - moveTolerance);
+  const sleepMiss = Math.max(0, Math.abs(counts.sleepingSteps - sleepTarget) - sleepTolerance);
+  const awakeMiss = Math.max(0, minAwakeSteps - counts.awakeSteps);
+  return moveMiss * 3 + sleepMiss * 2 + awakeMiss * 5;
+}
+
+function groupScheduleScore(animals: Animal[], config: SimulationConfig): number {
+  if (config.speciesPresetId !== "human") {
+    return 0;
+  }
+
+  const hourCounts = Array.from({ length: 24 }, () => 0);
+  let awakeAnimals = 0;
+  for (const animal of animals) {
+    let hasAwake = false;
+    for (const segment of animal.behaviorSchedule) {
+      if (segment.state === "awake_stationary") {
+        hasAwake = true;
+      }
+      if (segment.state !== "moving") {
+        continue;
+      }
+      for (let time = segment.startTimeSeconds; time < segment.endTimeSeconds; time += config.timeStepSeconds) {
+        const hour = Math.floor((((time / 3600) % 24) + 24) % 24);
+        hourCounts[hour] += 1;
+      }
+    }
+    if (hasAwake) {
+      awakeAnimals += 1;
+    }
+  }
+
+  const peakHour = hourCounts.reduce((best, count, hour) => (count > hourCounts[best] ? hour : best), 0);
+  const peakDistance = circularHourDistance(peakHour, 14);
+  const peakMiss = Math.max(0, peakDistance - 3);
+  const awakeMiss = Math.max(0, Math.ceil(animals.length / 2) - awakeAnimals);
+  return peakMiss * 10 + awakeMiss * 5;
+}
+
+function statesToSegments(states: AnimalState[], startTimeSeconds: number, stepSeconds: number): BehaviorSegment[] {
+  const segments: BehaviorSegment[] = [];
+  if (states.length === 0) {
+    return segments;
+  }
+
+  let current = states[0];
+  let startIndex = 0;
+  for (let index = 1; index <= states.length; index++) {
+    if (states[index] === current) {
+      continue;
+    }
+    segments.push({
+      startTimeSeconds: startTimeSeconds + startIndex * stepSeconds,
+      endTimeSeconds: startTimeSeconds + index * stepSeconds,
+      state: current
+    });
+    if (index < states.length) {
+      current = states[index];
+      startIndex = index;
+    }
+  }
+  return segments;
+}
+
+export function behaviorStateFromSchedule(segments: BehaviorSegment[], timeSeconds: number): AnimalState {
+  if (segments.length === 0) {
+    return "awake_stationary";
+  }
+  const segment = segments.find((row) => timeSeconds >= row.startTimeSeconds && timeSeconds < row.endTimeSeconds);
+  return segment?.state ?? segments.at(-1)?.state ?? "awake_stationary";
+}
+
+function secondsUntilScheduleChange(segments: BehaviorSegment[], timeSeconds: number): number {
+  const segment = segments.find((row) => timeSeconds >= row.startTimeSeconds && timeSeconds < row.endTimeSeconds);
+  return Math.max(0, (segment?.endTimeSeconds ?? timeSeconds) - timeSeconds);
 }
 
 function sampleTrait(
@@ -298,6 +558,7 @@ function chooseBehaviorStateFromTraits(
   const hour = ((timeSeconds / 3600 + traits.circadianPhaseOffsetHours) % 24 + 24) % 24;
   const activeDrive = combinedActivityDrive(timeSeconds, hour, traits, behavior);
   const restDrive = restKernel(hour, traits, behavior);
+  /** Scales circadian peaks; `dailyMotionMinutes` also sets `targetMoveFrac` for the locomotion budget. */
   const activityIntensity = clamp(traits.dailyMotionMinutes / 720, 0.15, 1.2);
   const weights = stateWeightsFromDrive(activeDrive, restDrive, activityIntensity, traits);
   const selected = rng.weightedIndex(weights);
@@ -352,8 +613,13 @@ function restKernel(hour: number, traits: AnimalTraits, behavior: BehaviorConfig
     return windowDrive(hour, traits.sleepCenterHour, traits.majorRestWindowHours);
   }
 
-  const sleepCenterHour =
-    behavior.circadianMode === "nocturnal" || traits.activityPattern.startsWith("nocturnal") ? 12 : 0;
+  const sleepCenterHour = traits.activityPattern.startsWith("nocturnal")
+    ? 12
+    : traits.activityPattern.startsWith("diurnal")
+      ? 0
+      : behavior.circadianMode === "nocturnal"
+        ? 12
+        : 0;
   return windowDrive(hour, sleepCenterHour, traits.majorRestWindowHours);
 }
 
@@ -364,11 +630,24 @@ function stateWeightsFromDrive(
   traits: AnimalTraits
 ): [number, number, number] {
   const synchronyBoost = traits.groupSynchrony * activeDrive * 0.25;
-  return [
-    0.015 + activeDrive * activityIntensity * 2.3 + synchronyBoost,
-    0.12 + activeDrive * 0.6,
-    0.08 + restDrive * 3.2 + Math.max(0, 1 - activeDrive) * 0.75
-  ];
+  /**
+   * `SpeciesPreset.dailyMotionMinutes` = intended mean minutes per 24h in the `moving` (locomotion) state.
+   * Maps to `targetMoveFrac` and scales the moving weight so long sleep bouts do not collapse realized
+   * duty far below the preset (see engine test `pins prairie vole dailyMotionMinutes...`).
+   */
+  const targetMoveFrac = clamp(traits.dailyMotionMinutes / (24 * 60), 0.04, 0.55);
+  /** Tuned so pinned 420 min/day lands ~7h locomotion for regression seed. */
+  const moveDutyBoost = Math.max(0.86, (0.55 + targetMoveFrac * 3.05) * 1.08 * 1.31);
+
+  const moving =
+    (0.018 + activeDrive * activityIntensity * 2.35 + synchronyBoost) * moveDutyBoost;
+  const stationary = 0.11 + activeDrive * 0.58 * (1.08 - 0.42 * targetMoveFrac);
+  const sleeping =
+    0.085 +
+    restDrive * (2.72 - 0.35 * targetMoveFrac) +
+    Math.max(0, 1 - activeDrive) * (0.7 - 0.12 * targetMoveFrac);
+
+  return [moving, stationary, sleeping];
 }
 
 function initialBoutRemainingSeconds(state: AnimalState, traits: AnimalTraits, rng: SeededRandom): number {
@@ -393,6 +672,15 @@ function windowDrive(hour: number, centerHour: number, windowHours: number): num
 function circularHourDistance(left: number, right: number): number {
   const rawDistance = Math.abs(left - right) % 24;
   return Math.min(rawDistance, 24 - rawDistance);
+}
+
+function circularSeconds(value: number): number {
+  return ((value % (24 * 3600)) + 24 * 3600) % (24 * 3600);
+}
+
+function circularSecondDistance(left: number, right: number): number {
+  const rawDistance = Math.abs(left - right) % (24 * 3600);
+  return Math.min(rawDistance, 24 * 3600 - rawDistance);
 }
 
 function clamp(value: number, min: number, max: number): number {

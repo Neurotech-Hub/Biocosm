@@ -301,7 +301,7 @@ export const SPECIES_PRESETS = {
 
 export type SpeciesPresetId = keyof typeof SPECIES_PRESETS;
 
-export const DEFAULT_SPECIES_PRESET_ID: SpeciesPresetId = "lab_mouse";
+export const DEFAULT_SPECIES_PRESET_ID: SpeciesPresetId = "prairie_vole";
 
 export const speciesPresetOptions = Object.values(SPECIES_PRESETS);
 

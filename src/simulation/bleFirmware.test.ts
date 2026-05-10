@@ -1,4 +1,4 @@
-import { computeEnergyLog } from "./energy";
+import { computeEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
 import { juxtaMainCMode0FixedPolicy, defaultSimulationConfig } from "./config";
 import {
   countAdvertisingPacketsInBursts,
@@ -46,6 +46,7 @@ describe("BLE firmware alignment", () => {
   it("chunked 60s epochs match one-shot scheduling within 2% for listen/adv packet counts (sub-60s chunks truncate bursts)", () => {
     const state = createInitialSimulation({
       ...defaultSimulationConfig,
+      pathNodeCount: 18,
       animalCount: 1,
       activePolicy: { ...juxtaMainCMode0FixedPolicy }
     });
@@ -69,6 +70,7 @@ describe("BLE firmware alignment", () => {
   it("schedules roughly 3 scans and ~9 advertises per wall minute for JUXTA mode 0 (one animal; serial radio + gaps)", () => {
     const state = createInitialSimulation({
       ...defaultSimulationConfig,
+      pathNodeCount: 18,
       animalCount: 1,
       startTimeSeconds: 0,
       activePolicy: { ...juxtaMainCMode0FixedPolicy }
@@ -86,6 +88,7 @@ describe("BLE firmware alignment", () => {
   it("minute write safe zone changes scheduled burst times", () => {
     const state = createInitialSimulation({
       ...defaultSimulationConfig,
+      pathNodeCount: 18,
       animalCount: 1,
       activePolicy: { ...juxtaMainCMode0FixedPolicy }
     });
@@ -111,6 +114,7 @@ describe("BLE firmware alignment", () => {
     };
     const observerTemplate = createInitialSimulation({
       ...defaultSimulationConfig,
+      pathNodeCount: 18,
       animalCount: 1,
       radio
     }).animals[0];
@@ -123,6 +127,7 @@ describe("BLE firmware alignment", () => {
 
     const peerTemplate = createInitialSimulation({
       ...defaultSimulationConfig,
+      pathNodeCount: 18,
       animalCount: 1,
       radio
     }).animals[0];
@@ -171,15 +176,23 @@ describe("BLE firmware alignment", () => {
     ).toHaveLength(0);
   });
 
-  it("attributes BLE energy to listen windows and ad packets, not full burst seconds at peak TX", () => {
+  it("attributes BLE advertising energy to µC per event, not burst wall × peak TX", () => {
     const bursts: BleBurstEvent[] = [
       { kind: "advertise", startTime: 0, endTime: 2, animalId: "a", policyId: "p" },
       { kind: "scan", startTime: 3, endTime: 4.5, animalId: "a", policyId: "p" }
     ];
     const energy = computeEnergyLog(60, 60, bursts, defaultSimulationConfig.energy);
-    const naiveAdvMahIfFullBurstPeakTx = (2 * defaultSimulationConfig.energy.txPeakCurrentMaAtPlus8Dbm) / 3600;
-    expect(energy.advertisingMah).toBeGreaterThan(0);
-    expect(energy.advertisingMah).toBeLessThan(naiveAdvMahIfFullBurstPeakTx);
+    const packets = countAdvertisingPacketsInBursts(
+      bursts,
+      defaultSimulationConfig.energy.advertisingEventIntervalSeconds
+    );
+    const scale = defaultSimulationConfig.energy.componentBleActivityScale ?? 1;
+    const expectedAdvMah =
+      ((packets * defaultSimulationConfig.energy.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) *
+      scale;
+    expect(energy.advertisingMah).toBeCloseTo(expectedAdvMah, 6);
     expect(energy.scanMah).toBeGreaterThan(0);
+    const naiveIfTwoSecondsAtSixteenMa = (2 * 16) / 3600;
+    expect(energy.advertisingMah).toBeLessThan(naiveIfTwoSecondsAtSixteenMa);
   });
 });

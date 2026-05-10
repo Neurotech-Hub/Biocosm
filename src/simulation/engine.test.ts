@@ -6,7 +6,7 @@ import { computeMotionObservations } from "./motionSensor";
 import { applyMotionPeerAdaptivePolicy, logInterpolate } from "./policies/adaptive";
 import { createBleBurstEvents, simulateBleDetections } from "./radio";
 import { SeededRandom } from "./random";
-import type { SimulationConfig } from "./types";
+import type { AnimalStateLog, SimulationConfig } from "./types";
 import { chooseBehaviorState, createInitialSimulation } from "./world";
 
 describe("simulation engine", () => {
@@ -299,6 +299,71 @@ describe("simulation engine", () => {
     expect(movingFraction).toBeLessThan(0.1);
   });
 
+  it("pins prairie vole dailyMotionMinutes to ~7h/day in moving state (locomotion budget)", () => {
+    const config = testConfig({
+      seed: "prairie-motion-target",
+      speciesPresetId: "prairie_vole",
+      animalCount: 1,
+      startTimeSeconds: 0,
+      advancedSpeciesOverrides: {
+        dailyMotionMinutes: { min: 420, mode: 420, max: 420 },
+        circadianPhaseOffsetHours: { min: 0, mode: 0, max: 0 }
+      }
+    });
+    let state = createInitialSimulation(config);
+    let movingSteps = 0;
+    const steps = (24 * 3600) / config.timeStepSeconds;
+    for (let i = 0; i < steps; i++) {
+      state = stepSimulation(state);
+      if (state.animals[0].state === "moving") {
+        movingSteps++;
+      }
+    }
+    expect(movingSteps).toBeGreaterThanOrEqual(380);
+    expect(movingSteps).toBeLessThanOrEqual(520);
+  });
+
+  it("keeps human seed 42 from producing all-sleep animal rows", () => {
+    const config = testConfig({
+      seed: "42",
+      speciesPresetId: "human",
+      animalCount: 6,
+      startTimeSeconds: 0
+    });
+    let state = createInitialSimulation(config);
+    const movingStepsByAnimal = new Map(state.animals.map((animal) => [animal.id, 0]));
+    const awakeStepsByAnimal = new Map(state.animals.map((animal) => [animal.id, 0]));
+    const steps = (24 * 3600) / config.timeStepSeconds;
+
+    for (let i = 0; i < steps; i++) {
+      state = stepSimulation(state);
+      for (const animal of state.animals) {
+        if (animal.state === "moving") {
+          movingStepsByAnimal.set(animal.id, (movingStepsByAnimal.get(animal.id) ?? 0) + 1);
+        } else if (animal.state === "awake_stationary") {
+          awakeStepsByAnimal.set(animal.id, (awakeStepsByAnimal.get(animal.id) ?? 0) + 1);
+        }
+      }
+    }
+
+    expect([...movingStepsByAnimal.values()].every((movingSteps) => movingSteps > 0)).toBe(true);
+    expect([...awakeStepsByAnimal.values()].filter((awakeSteps) => awakeSteps > 0).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("centers human group movement near the 14:00 active peak", () => {
+    const config = testConfig({
+      seed: "42",
+      speciesPresetId: "human",
+      animalCount: 6,
+      startTimeSeconds: 0
+    });
+    const state = runSimulation(createInitialSimulation(config), (24 * 3600) / config.timeStepSeconds);
+    const centerHour = weightedMovementCenterHour(state.logs.animalStates, config.startTimeSeconds);
+
+    expect(centerHour).toBeGreaterThanOrEqual(12);
+    expect(centerHour).toBeLessThanOrEqual(16);
+  });
+
   it("computes BLE capture rate from in-range dyad intervals", () => {
     const state = stepSimulation(
       createInitialSimulation(
@@ -444,4 +509,17 @@ function testConfig(overrides: TestConfigOverrides): SimulationConfig {
     },
     activePolicy: overrides.activePolicy ?? defaultSimulationConfig.activePolicy
   };
+}
+
+function weightedMovementCenterHour(rows: AnimalStateLog[], startTimeSeconds: number): number {
+  let weightedHours = 0;
+  let movingRows = 0;
+  for (const row of rows) {
+    if (row.behavioralState !== "moving") {
+      continue;
+    }
+    weightedHours += (((startTimeSeconds + row.time) / 3600) % 24 + 24) % 24;
+    movingRows += 1;
+  }
+  return movingRows > 0 ? weightedHours / movingRows : 0;
 }

@@ -101,7 +101,10 @@ export function ControlsPanel({
       }
     });
   };
-  const updateEnergyConfig = (field: keyof SimulationConfig["energy"], value: number) => {
+  const updateEnergyConfig = <K extends keyof SimulationConfig["energy"]>(
+    field: K,
+    value: SimulationConfig["energy"][K]
+  ) => {
     onConfigChange({
       ...config,
       energy: {
@@ -267,7 +270,8 @@ export function ControlsPanel({
           <input
             type="range"
             min="1"
-            max="60"
+            max="20"
+            step="1"
             value={speed}
             onChange={(event) => onSpeedChange(Number(event.target.value))}
           />
@@ -322,12 +326,12 @@ export function ControlsPanel({
         </label>
 
         <label>
-          Detection radius: {config.radio.detectionRadiusMeters.toFixed(1)} m
+          Detection radius: {config.radio.detectionRadiusMeters.toFixed(2)} m
           <input
             type="range"
-            min="0.3"
+            min="0.05"
             max="3"
-            step="0.1"
+            step="0.05"
             value={config.radio.detectionRadiusMeters}
             onChange={(event) =>
               onConfigChange({
@@ -339,12 +343,12 @@ export function ControlsPanel({
         </label>
 
         <label>
-          Social radius: {config.radio.socialRadiusMeters.toFixed(1)} m
+          Social radius: {config.radio.socialRadiusMeters.toFixed(2)} m
           <input
             type="range"
-            min="0.2"
+            min="0.05"
             max="2"
-            step="0.1"
+            step="0.05"
             value={config.radio.socialRadiusMeters}
             onChange={(event) =>
               onConfigChange({
@@ -652,11 +656,27 @@ export function ControlsPanel({
       <section className="control-section">
         <h3>Energy / Battery</h3>
         <p className="helper-text">
-          BLE draw uses RX only during scan listen windows and TX only for synthetic advertising packets (three nominal
-          channels × per-channel on-air time), plus CPU overhead over burst wall clock, at Nordic-style nominal mA.
+          Component model: baseline µA plus scan (RX × listen-window seconds) and advertising (packet events × µC/event)
+          for <strong>one representative collar</strong>. Empirical mode uses the bench total for 5s/20s minus baseline
+          for that same collar.
         </p>
         <label>
-          Assumed TX power (energy prior): {config.energy.txPowerDbm} dBm
+          Energy model
+          <select
+            value={config.energy.energyModel}
+            onChange={(event) =>
+              updateEnergyConfig(
+                "energyModel",
+                event.target.value as SimulationConfig["energy"]["energyModel"]
+              )
+            }
+          >
+            <option value="component">Component (µC/event + listen RX + baseline)</option>
+            <option value="empiricalAverage">Empirical average (total − baseline, Juxta 5s/20s ref)</option>
+          </select>
+        </label>
+        <label>
+          Assumed TX power (label / prior): {config.energy.txPowerDbm} dBm
           <input
             type="range"
             min="-4"
@@ -689,14 +709,62 @@ export function ControlsPanel({
           />
         </label>
         <label>
-          Steady current: {(config.energy.steadyCurrentMa * 1000).toFixed(0)} uA
+          Baseline (non-BLE): {config.energy.baselineCurrentMicroAmps.toFixed(0)} µA
           <input
             type="range"
             min="10"
             max="500"
-            step="10"
-            value={config.energy.steadyCurrentMa * 1000}
-            onChange={(event) => updateEnergyConfig("steadyCurrentMa", Number(event.target.value) / 1000)}
+            step="5"
+            value={config.energy.baselineCurrentMicroAmps}
+            onChange={(event) => updateEnergyConfig("baselineCurrentMicroAmps", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Scan RX current: {config.energy.rxCurrentMa1MPhy.toFixed(2)} mA
+          <input
+            type="range"
+            min="3"
+            max="10"
+            step="0.05"
+            value={config.energy.rxCurrentMa1MPhy}
+            onChange={(event) => updateEnergyConfig("rxCurrentMa1MPhy", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Advertising event spacing: {config.energy.advertisingEventIntervalSeconds.toFixed(2)} s (detection grid)
+          <input
+            type="range"
+            min="0.05"
+            max="0.25"
+            step="0.01"
+            value={config.energy.advertisingEventIntervalSeconds}
+            onChange={(event) =>
+              updateEnergyConfig("advertisingEventIntervalSeconds", Number(event.target.value))
+            }
+          />
+        </label>
+        <label>
+          Advertising event charge: {config.energy.advEventChargeMicroCoulombs.toFixed(1)} µC
+          <input
+            type="range"
+            min="5"
+            max="25"
+            step="0.5"
+            value={config.energy.advEventChargeMicroCoulombs}
+            onChange={(event) => updateEnergyConfig("advEventChargeMicroCoulombs", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Juxta 5s/20s bench total (empirical + warn): {config.energy.measuredSocial5s20sTotalMicroAmps.toFixed(1)} µA
+          <input
+            type="range"
+            min="120"
+            max="400"
+            step="1"
+            value={config.energy.measuredSocial5s20sTotalMicroAmps}
+            onChange={(event) =>
+              updateEnergyConfig("measuredSocial5s20sTotalMicroAmps", Number(event.target.value))
+            }
           />
         </label>
       </section>

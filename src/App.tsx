@@ -10,7 +10,13 @@ import { TimelinePanel } from "./components/TimelinePanel";
 import { computeMetrics } from "./simulation/analysis";
 import { defaultSimulationConfig } from "./simulation/config";
 import { mergeLogs, stepSimulation } from "./simulation/engine";
-import { buildTimeSeries, type TimeSeriesPoint } from "./simulation/timeSeries";
+import {
+  buildAnimalStripEvents,
+  buildTimeSeries,
+  sortedAnimalIdsFromLogs,
+  type AnimalStripEvent,
+  type TimeSeriesPoint
+} from "./simulation/timeSeries";
 import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationState } from "./simulation/types";
 import { createInitialSimulation } from "./simulation/world";
 
@@ -79,8 +85,15 @@ export function App() {
             showTrueProximity={showTrueProximity}
             showObservedDetections={showObservedDetections}
           />
-          <TimeSeriesPanel points={build.timeSeries} energy={build.logs.energy} currentStep={currentStep} />
           <LegendPanel />
+          <TimeSeriesPanel
+            points={build.timeSeries}
+            energy={build.logs.energy}
+            currentStep={currentStep}
+            animalStripEvents={build.animalStripEvents}
+            animalIds={build.animalIdsStripOrder}
+            startTimeSeconds={builtConfig.startTimeSeconds}
+          />
           <MetricsPanel metrics={build.metrics} animalCount={builtConfig.animalCount} />
           <RawDataPanel logs={build.logs} config={builtConfig} timeline={build.timeline} />
           <AssumptionsPanel config={builtConfig} />
@@ -152,6 +165,8 @@ type SimulationBuild = {
   timeline: SimulationState[];
   logs: SimulationLogs;
   timeSeries: TimeSeriesPoint[];
+  animalStripEvents: AnimalStripEvent[];
+  animalIdsStripOrder: string[];
   metrics: SimulationMetrics;
 };
 
@@ -171,6 +186,8 @@ function createSimulationBuild(initialState: SimulationState): SimulationBuild {
     timeline,
     logs,
     timeSeries: buildTimeSeries(timeline),
+    animalStripEvents: buildAnimalStripEvents(logs),
+    animalIdsStripOrder: sortedAnimalIdsFromLogs(logs),
     metrics: computeMetrics(current, logs)
   };
 }
@@ -206,6 +223,8 @@ function createTimelineAsync(
       timeline,
       logs,
       timeSeries: buildTimeSeries(timeline),
+      animalStripEvents: buildAnimalStripEvents(logs),
+      animalIdsStripOrder: sortedAnimalIdsFromLogs(logs),
       metrics: computeMetrics(current, logs)
     });
   };

@@ -1,3 +1,5 @@
+import { formatClockHHMM } from "../timeFormat";
+
 type TimelinePanelProps = {
   currentStep: number;
   totalSteps: number;
@@ -15,7 +17,7 @@ export function TimelinePanel({
   timeStepSeconds,
   onStepChange
 }: TimelinePanelProps) {
-  const clock = formatClock(startTimeSeconds + timeSeconds);
+  const clock = formatClockHHMM(startTimeSeconds + timeSeconds);
   const elapsed = formatElapsed(timeSeconds);
   const dayPhase = getDayPhase(startTimeSeconds + timeSeconds);
 
@@ -50,14 +52,6 @@ export function TimelinePanel({
       <p className="helper-text">Each slider step advances {timeStepSeconds} simulated seconds.</p>
     </section>
   );
-}
-
-function formatClock(timeSeconds: number): string {
-  const secondsInDay = 24 * 60 * 60;
-  const daySeconds = ((timeSeconds % secondsInDay) + secondsInDay) % secondsInDay;
-  const hours = Math.floor(daySeconds / 3600);
-  const minutes = Math.floor((daySeconds % 3600) / 60);
-  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}`;
 }
 
 function formatElapsed(timeSeconds: number): string {

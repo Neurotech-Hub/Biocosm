@@ -62,6 +62,12 @@ export type AnimalPosition = {
   y: number;
 };
 
+export type BehaviorSegment = {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  state: AnimalState;
+};
+
 export type CollarState = {
   animalId: string;
   valid: boolean;
@@ -92,6 +98,7 @@ export type Animal = {
   collar: CollarState;
   boutRemainingSeconds: number;
   recentNodeIds: string[];
+  behaviorSchedule: BehaviorSegment[];
 };
 
 export type EnclosureConfig = {
@@ -150,21 +157,32 @@ export type BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: number;
 };
 
+export type EnergyModel = "component" | "empiricalAverage";
+
 export type EnergyConfig = {
   batteryCapacityMah: number;
   startingVoltage: number;
-  steadyCurrentMa: number;
-  /** Assumed TX power for energy priors; RSSI path loss is separate. */
+  /** Non-BLE platform draw: sleep MCU, RTC, sensors idle, logging (µA). */
+  baselineCurrentMicroAmps: number;
+  /** Assumed TX power for labeling / RSSI priors; path loss is separate. */
   txPowerDbm: number;
-  /** Nordic nominal @ +8 dBm, 1M PHY — TX energy uses packet on-air time × this value. */
-  txPeakCurrentMaAtPlus8Dbm: number;
-  /** Nordic nominal RX 1 Mbps — scan energy uses listen-window duration × this value. */
+  /** Nordic-style RX @ 1M PHY — scan energy uses listen-window seconds × this (mA). */
   rxCurrentMa1MPhy: number;
-  advChannelsPerEvent: number;
-  /** Per-channel on-air time assumed for one advertising PDU (nominal). */
-  txPacketDurationSecondsNominal: number;
-  /** CPU / softdevice overhead while radio is active (burst wall time). */
-  cpuActiveOverheadDuringBleMa: number;
+  /** Spacing of synthetic advertising events; must match detection + energy accounting. */
+  advertisingEventIntervalSeconds: number;
+  /** Calibrated charge per advertising event (µC); converted to mAh via µC / 3_600_000. */
+  advEventChargeMicroCoulombs: number;
+  energyModel: EnergyModel;
+  /**
+   * Bench / datasheet total average current for Juxta social mode (5 s adv / 20 s scan), µA.
+   * Used for empiricalAverage model and >3× warnings vs component estimates.
+   */
+  measuredSocial5s20sTotalMicroAmps: number;
+  /**
+   * Multiplies scan + advertising component mAh only (baseline unchanged). Optional preset tuning so event schedules
+   * match datasheet long-run averages when burst-level counts undercount duty.
+   */
+  componentBleActivityScale?: number;
 };
 
 export type FixedPolicyConfig = {
@@ -369,7 +387,11 @@ export type SimulationMetrics = {
   meanSamplingDrive: number;
   meanScanIntervalSeconds: number;
   energyUsedMah: number;
+  /** Time-averaged current draw (µA) from cumulative mAh — one representative collar. */
+  meanEnergyCurrentMicroAmpsPerCollar: number;
   batteryRemainingPercent: number;
   estimatedVoltage: number;
   capturePerMah: number;
+  /** Shown when component model with Juxta 5s/20s policy predicts ≫ datasheet reference. */
+  energyModelWarning?: string;
 };
