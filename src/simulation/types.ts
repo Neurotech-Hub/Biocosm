@@ -138,6 +138,8 @@ export type MotionSensorConfig = {
 
 export type RadioConfig = {
   detectionRadiusMeters: number;
+  /** Sampling interval for epoch-integrated BLE opportunity checks (seconds). */
+  opportunitySampleStepSeconds: number;
   socialRadiusMeters: number;
   rssiAtOneMeter: number;
   pathLossExponent: number;
@@ -196,23 +198,35 @@ export type FixedPolicyConfig = {
   advertisingBurstDurationSeconds?: number;
 };
 
+export type AdaptiveBleTiming = {
+  scanIntervalSeconds: number;
+  scanWindowSeconds: number;
+  advIntervalSeconds: number;
+};
+
+export type AdaptiveBleTimingAnchors = {
+  lowIntensity: AdaptiveBleTiming;
+  neutral: AdaptiveBleTiming;
+  highIntensity: AdaptiveBleTiming;
+  advertisingBurstDurationSeconds: number;
+};
+
 export type MotionPeerAdaptivePolicyConfig = {
   id: string;
   type: "motion_peer_adaptive";
   name: string;
-  scanIntervalMinSeconds: number;
-  scanIntervalMaxSeconds: number;
-  scanWindowMinSeconds: number;
-  scanWindowMaxSeconds: number;
-  advIntervalMinSeconds: number;
-  advIntervalMaxSeconds: number;
+  timingAnchors: AdaptiveBleTimingAnchors;
+  baselineDrive: number;
   tauMotionSeconds: number;
   tauPeerSeconds: number;
   motionGain: number;
   peerGain: number;
+  peerMissPenalty: number;
   motionWeight: number;
   peerWeight: number;
-  advertisingBurstDurationSeconds?: number;
+  peerDetectionCountSaturation: number;
+  motionEventCountSaturation: number;
+  allowEnergySavingDownscale: boolean;
 };
 
 export type FirmwarePolicyConfig = FixedPolicyConfig | MotionPeerAdaptivePolicyConfig;
@@ -319,7 +333,14 @@ export type AnimalStateLog = {
 };
 
 export type TrueDyadLog = TrueContact & {
+  epochStartTime: number;
+  epochEndTime: number;
   bothCollarsValid: boolean;
+  withinDetectionRadiusAtEnd: boolean;
+  withinDetectionRadiusAny: boolean;
+  inRangeSeconds: number;
+  minDistanceMeters: number;
+  endDistanceMeters: number;
 };
 
 export type CollarStateLog = {
@@ -338,12 +359,37 @@ export type CollarStateLog = {
   samplingDrive: number;
 };
 
+export type AdaptiveBlePolicyLog = {
+  time: number;
+  epochStartTime: number;
+  epochEndTime: number;
+  animalId: string;
+  motionDetected: boolean;
+  motionEventCount?: number;
+  localPeerDetectionCount: number;
+  observerScannedWithoutPeer: boolean;
+  baselineContribution: number;
+  motionContribution: number;
+  peerContribution: number;
+  motionDrive: number;
+  peerDrive: number;
+  samplingDrive: number;
+  scanIntervalSeconds: number;
+  scanWindowSeconds: number;
+  advIntervalSeconds: number;
+  advertisingBurstDurationSeconds: number;
+  combinedEnvelopeDuty: number;
+  saturatedScheduleWarning: boolean;
+  energyEstimate_uAh?: number;
+};
+
 export type SimulationLogs = {
   animalStates: AnimalStateLog[];
   trueDyads: TrueDyadLog[];
   detections: DetectionEvent[];
   bleBursts: BleBurstEvent[];
   scanWindows: ScanWindowLog[];
+  adaptiveBlePolicy: AdaptiveBlePolicyLog[];
   collarStates: CollarStateLog[];
   energy: EnergyLog[];
 };
@@ -376,7 +422,7 @@ export type SimulationMetrics = {
   scanWindows: number;
   negativeScanWindows: number;
   uniqueObservedDyads: number;
-  recallEstimate: number;
+  rawDetectionDensity: number;
   bleCaptureRate: number;
   bleCaptureHits: number;
   bleCaptureOpportunities: number;

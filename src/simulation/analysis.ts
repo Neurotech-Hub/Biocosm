@@ -110,7 +110,7 @@ export function computeMetricsFromLogs(
 ): SimulationMetrics {
   const trueContactSteps = logs.trueDyads.filter((dyad) => dyad.withinSocialRadius && dyad.bothCollarsValid).length;
   const observedDyads = new Set(logs.detections.map((event) => pairKey(event.observerId, event.peerId)));
-  const trueDetectionOpportunities = logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius && dyad.bothCollarsValid).length;
+  const trueDetectionOpportunities = logs.trueDyads.filter((dyad) => dyad.withinDetectionRadiusAny && dyad.bothCollarsValid).length;
   const firmwareMinuteRecords = buildFirmwareMinuteRecords(logs.detections, startTimeSecondsForMinuteRecords);
   const firmwareMinuteObserverSlots = firmwareMinuteRecords.reduce(
     (sum, record) => sum + record.detectedPeers.length,
@@ -123,7 +123,7 @@ export function computeMetricsFromLogs(
     scanWindows: logs.scanWindows.length,
     negativeScanWindows: logs.scanWindows.filter((window) => !window.detectedAnyPeer).length,
     uniqueObservedDyads: observedDyads.size,
-    recallEstimate: trueDetectionOpportunities > 0 ? logs.detections.length / trueDetectionOpportunities : 0,
+    rawDetectionDensity: trueDetectionOpportunities > 0 ? logs.detections.length / trueDetectionOpportunities : 0,
     bleCaptureRate: 0,
     bleCaptureHits: 0,
     bleCaptureOpportunities: 0,
@@ -148,15 +148,16 @@ function computeBleCapture(state: SimulationState, logs: SimulationLogs): { hits
   const dt = state.config.timeStepSeconds;
 
   for (const dyad of logs.trueDyads) {
-    if (!dyad.withinDetectionRadius || !dyad.bothCollarsValid) {
+    if (!dyad.withinDetectionRadiusAny || !dyad.bothCollarsValid) {
       continue;
     }
 
     opportunities += 1;
     const dyadKey = pairKey(dyad.animalA, dyad.animalB);
-    const epochStart = dyad.time - dt;
+    const epochStart = dyad.epochStartTime ?? dyad.time - dt;
+    const epochEnd = dyad.epochEndTime ?? dyad.time;
     const detected = logs.detections.some(
-      (event) => pairKey(event.observerId, event.peerId) === dyadKey && event.time > epochStart && event.time <= dyad.time
+      (event) => pairKey(event.observerId, event.peerId) === dyadKey && event.time > epochStart && event.time <= epochEnd
     );
 
     if (detected) {

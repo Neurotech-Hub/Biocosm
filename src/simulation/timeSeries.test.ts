@@ -61,17 +61,25 @@ describe("time series helpers", () => {
       trueDyads: [
         {
           time: 240,
+          epochStartTime: 180,
+          epochEndTime: 240,
           animalA: "animal-1",
           animalB: "animal-2",
           distance: 0.4,
           withinDetectionRadius: true,
+          withinDetectionRadiusAtEnd: true,
+          withinDetectionRadiusAny: true,
           withinSocialRadius: true,
-          bothCollarsValid: true
+          bothCollarsValid: true,
+          inRangeSeconds: 60,
+          minDistanceMeters: 0.4,
+          endDistanceMeters: 0.4
         }
       ],
       detections: [],
       bleBursts: [],
       scanWindows: [],
+      adaptiveBlePolicy: [],
       collarStates: [],
       energy: []
     };

@@ -1,12 +1,10 @@
 import type { SimulationConfig } from "../simulation/types";
-import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
 
 type AssumptionsPanelProps = {
   config: SimulationConfig;
 };
 
 export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
-  const speciesPreset = resolveSpeciesPreset(config.speciesPresetId, config.speciesModifiers, config.advancedSpeciesOverrides);
   const policySummary =
     config.activePolicy.type === "fixed"
       ? "Fixed-rate collars scan and advertise on constant schedules, independent of animal behavior."
@@ -14,35 +12,49 @@ export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
 
   return (
     <section className="panel assumptions-panel">
-      <h2>Algorithms And Assumptions</h2>
-      <p>
-        Biology uses the {speciesPreset.label} preset ({speciesPreset.activityPattern.replaceAll("_", " ")},{" "}
-        {speciesPreset.confidence} confidence) as a simulation prior; sampled per-animal traits are exported with raw data.
-      </p>
-      <p>{policySummary}</p>
-      <ul>
-        <li>Firmware sees simulated motion and recent detections, not true position or true social contact.</li>
-        <li>
-          The canvas uses the simulation time step (often 60 s); BLE still uses serial scan/advertising bursts with
-          scan-first ties when both are due (<code>scanDueAt &lt;= advDueAt</code>), like firmware that checks scan
-          before advertise.
-        </li>
-        <li>
-          Detections require an advertising packet inside a scanner listen window before the RSSI logistic draw; distance
-          for each hit uses positions linearly interpolated between the frame start and end.
-        </li>
-        <li>
-          Energy uses RX during scan listen windows and TX during nominal multi-channel advertising packet times, plus
-          CPU overhead over burst wall time, on top of steady peripheral draw.
-        </li>
-        <li>
-          Whole-simulation metrics distinguish interval-level BLE capture from firmware-minute-style unique peers per
-          clock minute (strongest RSSI kept per peer).
-        </li>
-        <li>Light/dark phase is shown in the time-series panel rather than changing the enclosure background.</li>
-        <li>Changing physical size changes meter distances while the canvas still scales to fit the screen.</li>
-        <li>Raw detections are behavior-dependent observations, not unbiased social-contact measurements.</li>
-      </ul>
+      <details>
+        <summary>Algorithms And Assumptions</summary>
+        <p>{policySummary}</p>
+        <ul>
+          <li>
+            Animal behavior is generated from per-animal stochastic schedules with states for sleeping, awake stationary,
+            moving, and social pause; movement follows the path graph while preserving configured circadian and activity
+            budgets.
+          </li>
+          <li>
+            Firmware policies observe simulated accelerometer motion and prior BLE detections only. They do not observe
+            true position, true dyad distance, or true social-contact state.
+          </li>
+          <li>
+            BLE events are simulated as serial scan and advertise bursts. If scan and advertise are both due, scan is
+            scheduled first (<code>scanDueAt &lt;= advDueAt</code>), with configured inter-burst timing and safe-zone
+            delays.
+          </li>
+          <li>
+            A detection requires a peer advertising event to fall inside an observer scan listen window. Distance at the
+            packet time is linearly interpolated between epoch start and end, then filtered by detection radius and an
+            RSSI-based logistic detection probability.
+          </li>
+          <li>
+            BLE capture rate is computed over unordered dyad epochs: an opportunity exists when both collars are valid
+            and the pair is within detection radius at any sampled point in the epoch; a hit requires at least one
+            matching detection during that same epoch.
+          </li>
+          <li>
+            Firmware-minute records collapse raw detections into observer/minute rows with unique peers and strongest
+            RSSI retained per peer. These rollups are export-oriented and separate from the interval-level capture
+            metric.
+          </li>
+          <li>
+            Energy estimates model a representative collar using steady baseline draw plus RX scan listening and TX
+            advertising event charge, with optional calibration against the Juxta 5 s advertise / 20 s scan reference.
+          </li>
+          <li>
+            Raw BLE detections are behavior- and schedule-dependent observations; they should not be interpreted as
+            unbiased samples of true social contact.
+          </li>
+        </ul>
+      </details>
     </section>
   );
 }

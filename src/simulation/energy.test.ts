@@ -6,6 +6,7 @@ import {
 } from "./config";
 import { computeEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
 import { runSimulation } from "./engine";
+import type { BleBurstEvent } from "./types";
 import { createInitialSimulation } from "./world";
 
 describe("energy model", () => {
@@ -20,6 +21,27 @@ describe("energy model", () => {
     expect(energy.steadyMah).toBeCloseTo(expectedSteady, 6);
     expect(energy.scanMah).toBe(0);
     expect(energy.advertisingMah).toBe(0);
+  });
+
+  it("uses scan listen duty and advertising event charge instead of burst wall time", () => {
+    const bursts: BleBurstEvent[] = [
+      { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
+      { kind: "advertise", startTime: 10, endTime: 12, animalId: "animal-1", policyId: "fixed-rate" }
+    ];
+    const config = {
+      ...defaultSimulationConfig.energy,
+      baselineCurrentMicroAmps: 0,
+      advertisingEventIntervalSeconds: 10,
+      componentBleActivityScale: 1
+    };
+
+    const energy = computeEnergyLog(60, 60, bursts, config);
+
+    expect(energy.scanMah).toBeCloseTo((0.375 * config.rxCurrentMa1MPhy) / 3600, 8);
+    expect(energy.advertisingMah).toBeCloseTo(
+      config.advEventChargeMicroCoulombs / MICROCOULOMBS_PER_MILLIAMP_HOUR,
+      12
+    );
   });
 
   it("datasheet mean current converts to mAh (233.09 µA × 24 h ≈ 5.59 mAh per device)", () => {

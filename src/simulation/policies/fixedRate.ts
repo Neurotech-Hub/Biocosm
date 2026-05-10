@@ -52,9 +52,9 @@ export function getPolicyTiming(policy: FirmwarePolicyConfig): {
   advIntervalSeconds: number;
   advertisingBurstDurationSeconds: number;
 } {
-  const advertisingBurstDurationSeconds =
-    policy.advertisingBurstDurationSeconds ?? DEFAULT_ADVERTISING_BURST_DURATION_SECONDS;
   if (policy.type === "fixed") {
+    const advertisingBurstDurationSeconds =
+      policy.advertisingBurstDurationSeconds ?? DEFAULT_ADVERTISING_BURST_DURATION_SECONDS;
     return {
       scanIntervalSeconds: policy.scanIntervalSeconds,
       scanWindowSeconds: policy.scanWindowSeconds,
@@ -64,10 +64,10 @@ export function getPolicyTiming(policy: FirmwarePolicyConfig): {
   }
 
   return {
-    scanIntervalSeconds: policy.scanIntervalMaxSeconds,
-    scanWindowSeconds: policy.scanWindowMinSeconds,
-    advIntervalSeconds: policy.advIntervalMaxSeconds,
-    advertisingBurstDurationSeconds
+    scanIntervalSeconds: policy.timingAnchors.neutral.scanIntervalSeconds,
+    scanWindowSeconds: policy.timingAnchors.neutral.scanWindowSeconds,
+    advIntervalSeconds: policy.timingAnchors.neutral.advIntervalSeconds,
+    advertisingBurstDurationSeconds: policy.timingAnchors.advertisingBurstDurationSeconds
   };
 }
 

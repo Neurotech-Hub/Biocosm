@@ -57,18 +57,27 @@ export function createEmptyLogs(): SimulationLogs {
     detections: [],
     bleBursts: [],
     scanWindows: [],
+    adaptiveBlePolicy: [],
     collarStates: [],
     energy: []
   };
 }
 
+/**
+ * Inset from enclosure edges (fraction of width/height). Formerly 8%–92%; using ~2% inset lets paths/nodes use
+ * almost the full physical box without changing RNG call counts (seed determinism / tests).
+ */
+const PATH_NODE_MARGIN_FRAC = 0.02;
+
 export function createPathGraph(config: SimulationConfig, rng: SeededRandom): PathGraph {
   const { width, height } = config.enclosure;
   const nodeCount = Math.max(4, config.pathNodeCount);
+  const mx = width * PATH_NODE_MARGIN_FRAC;
+  const my = height * PATH_NODE_MARGIN_FRAC;
   const nodes: PathNode[] = Array.from({ length: nodeCount }, (_, index) => ({
     id: `node-${index + 1}`,
-    x: rng.range(width * 0.08, width * 0.92),
-    y: rng.range(height * 0.08, height * 0.92),
+    x: rng.range(mx, width - mx),
+    y: rng.range(my, height - my),
     type: nodeTypeForIndex(index)
   }));
 

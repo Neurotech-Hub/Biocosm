@@ -1,16 +1,22 @@
 import { useMemo, type ReactNode } from "react";
 import {
   decimateMovementStripEvents,
+  type AdaptiveBleTimePoint,
   type AnimalStripEvent,
   type AnimalStripEventKind,
+  type FixedBleTimePoint,
   type TimeSeriesPoint
 } from "../simulation/timeSeries";
+import type { FirmwarePolicyConfig } from "../simulation/types";
 import type { EnergyLog } from "../simulation/types";
 import { formatClockHHMM } from "../timeFormat";
 
 type TimeSeriesPanelProps = {
   points: TimeSeriesPoint[];
   energy: EnergyLog[];
+  adaptiveBleSeries: AdaptiveBleTimePoint[];
+  fixedBleSeries: FixedBleTimePoint[];
+  activePolicyType: FirmwarePolicyConfig["type"];
   currentStep: number;
   animalStripEvents: AnimalStripEvent[];
   animalIds: string[];
@@ -20,11 +26,13 @@ type TimeSeriesPanelProps = {
 const chartWidth = 860;
 /** Taller bottom margin for dual x-axis (clock + elapsed offset). Plot height unchanged vs prior 128px. */
 const chartHeight = 194;
+/** BLE policy analysis charts (aligned x-axis with main chart). */
+const bleChartHeight = 176;
 const chartPadding = {
   top: 18,
   right: 62,
   bottom: 48,
-  left: 54
+  left: 58
 };
 
 const stripChartWidth = chartWidth;
@@ -48,6 +56,9 @@ type StripSummary = ReturnType<typeof createStripSummary>;
 export function TimeSeriesPanel({
   points,
   energy,
+  adaptiveBleSeries,
+  fixedBleSeries,
+  activePolicyType,
   currentStep,
   animalStripEvents,
   animalIds,
@@ -56,6 +67,14 @@ export function TimeSeriesPanel({
   const mainSummary = useMemo(
     () => createChartSummary(points, energy, currentStep),
     [currentStep, energy, points]
+  );
+  const adaptiveBleSummary = useMemo(
+    () => createAdaptiveBleChartSummary(adaptiveBleSeries, points, currentStep),
+    [adaptiveBleSeries, currentStep, points]
+  );
+  const fixedBleSummary = useMemo(
+    () => createFixedBleChartSummary(fixedBleSeries, points, currentStep),
+    [fixedBleSeries, currentStep, points]
   );
   const stripSummary = useMemo(
     () => createStripSummary(animalIds, mainSummary.maxTime, currentStep, points),
@@ -156,6 +175,24 @@ export function TimeSeriesPanel({
               y2={chartPadding.top + mainSummary.plotHeight}
               className="chart-axis"
             />
+            <text
+              className="chart-axis-title chart-axis-title-primary"
+              x={16}
+              y={chartPadding.top + mainSummary.plotHeight / 2}
+              transform={`rotate(-90 16 ${chartPadding.top + mainSummary.plotHeight / 2})`}
+              textAnchor="middle"
+            >
+              Moving fraction (0–1)
+            </text>
+            <text
+              className="chart-axis-title chart-axis-title-secondary"
+              x={chartWidth - 16}
+              y={chartPadding.top + mainSummary.plotHeight / 2}
+              transform={`rotate(90 ${chartWidth - 16} ${chartPadding.top + mainSummary.plotHeight / 2})`}
+              textAnchor="middle"
+            >
+              Energy (mAh)
+            </text>
             {mainSummary.movementTicks.map((tick) => {
               const y =
                 chartPadding.top + mainSummary.plotHeight - (tick / mainSummary.maxMovement) * mainSummary.plotHeight;
@@ -212,6 +249,243 @@ export function TimeSeriesPanel({
             </span>
           </div>
         </div>
+
+        {activePolicyType === "motion_peer_adaptive" && adaptiveBleSeries.length > 0 ? (
+          <div className="time-series-chart-card">
+            <h3 className="chart-subtitle chart-card-title">Adaptive BLE policy (cohort mean)</h3>
+            <svg
+              className="time-series-chart ble-policy-chart"
+              viewBox={`0 0 ${chartWidth} ${bleChartHeight}`}
+              role="img"
+              aria-label="Mean sampling drive and mean scan interval for adaptive BLE policy over time"
+            >
+              <rect x="0" y="0" width={chartWidth} height={bleChartHeight} rx="12" className="chart-background" />
+              <line
+                x1={chartPadding.left}
+                y1={adaptiveBleSummary.neutralY}
+                x2={chartPadding.left + adaptiveBleSummary.plotWidth}
+                y2={adaptiveBleSummary.neutralY}
+                className="neutral-drive-line"
+              />
+              <line
+                x1={chartPadding.left}
+                y1={chartPadding.top + adaptiveBleSummary.plotHeight}
+                x2={chartPadding.left + adaptiveBleSummary.plotWidth}
+                y2={chartPadding.top + adaptiveBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <line
+                x1={chartPadding.left}
+                y1={chartPadding.top}
+                x2={chartPadding.left}
+                y2={chartPadding.top + adaptiveBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <line
+                x1={chartPadding.left + adaptiveBleSummary.plotWidth}
+                y1={chartPadding.top}
+                x2={chartPadding.left + adaptiveBleSummary.plotWidth}
+                y2={chartPadding.top + adaptiveBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <text
+                className="chart-axis-title chart-axis-title-primary"
+                x={16}
+                y={chartPadding.top + adaptiveBleSummary.plotHeight / 2}
+                transform={`rotate(-90 16 ${chartPadding.top + adaptiveBleSummary.plotHeight / 2})`}
+                textAnchor="middle"
+              >
+                Sampling drive (0–1)
+              </text>
+              <text
+                className="chart-axis-title chart-axis-title-secondary"
+                x={chartWidth - 16}
+                y={chartPadding.top + adaptiveBleSummary.plotHeight / 2}
+                transform={`rotate(90 ${chartWidth - 16} ${chartPadding.top + adaptiveBleSummary.plotHeight / 2})`}
+                textAnchor="middle"
+              >
+                Scan interval (s)
+              </text>
+              {adaptiveBleSummary.driveTicks.map((tick) => {
+                const y =
+                  chartPadding.top +
+                  adaptiveBleSummary.plotHeight -
+                  (tick / adaptiveBleSummary.maxDrive) * adaptiveBleSummary.plotHeight;
+                return (
+                  <text key={`ad-drive-${tick}`} x={chartPadding.left - 8} y={y + 4} className="chart-label chart-label-end">
+                    {formatTick(tick)}
+                  </text>
+                );
+              })}
+              {adaptiveBleSummary.scanTicks.map((tick) => {
+                const y =
+                  chartPadding.top +
+                  adaptiveBleSummary.plotHeight -
+                  (tick / adaptiveBleSummary.maxScan) * adaptiveBleSummary.plotHeight;
+                return (
+                  <text
+                    key={`ad-scan-${tick}`}
+                    x={chartPadding.left + adaptiveBleSummary.plotWidth + 8}
+                    y={y + 4}
+                    className="chart-label"
+                  >
+                    {formatTick(tick)}
+                  </text>
+                );
+              })}
+              {mainSummary.xTicks.map((tick) => {
+                const x = chartPadding.left + (tick / adaptiveBleSummary.maxTime) * adaptiveBleSummary.plotWidth;
+                const absoluteTime = startTimeSeconds + tick;
+                return (
+                  <g key={`ble-ad-time-${tick}`}>
+                    <text x={x} y={bleChartHeight - 27} className="chart-label chart-label-middle chart-axis-time-of-day">
+                      {formatClockHHMM(absoluteTime)}
+                    </text>
+                    <text x={x} y={bleChartHeight - 15} className="chart-label chart-label-middle chart-axis-elapsed">
+                      {formatElapsedAxisTick(tick)}
+                    </text>
+                  </g>
+                );
+              })}
+              <path d={adaptiveBleSummary.drivePath} className="ble-adaptive-drive-line" fill="none" />
+              <path d={adaptiveBleSummary.scanPath} className="ble-adaptive-scan-line" fill="none" />
+              <line
+                x1={adaptiveBleSummary.cursorX}
+                y1={chartPadding.top}
+                x2={adaptiveBleSummary.cursorX}
+                y2={chartPadding.top + adaptiveBleSummary.plotHeight}
+                className="current-time-line"
+              />
+            </svg>
+            <div className="chart-legend">
+              <span>
+                <i className="legend-swatch ble-legend-drive" /> sampling drive (0–1, left; dashed = 0.5 neutral)
+              </span>
+              <span>
+                <i className="legend-swatch ble-legend-scan" /> mean scan interval (s, right)
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {activePolicyType === "fixed" && fixedBleSeries.length > 0 && fixedBleSummary.hasPolicyRow ? (
+          <div className="time-series-chart-card">
+            <h3 className="chart-subtitle chart-card-title">Fixed-rate BLE schedule</h3>
+            <svg
+              className="time-series-chart ble-policy-chart"
+              viewBox={`0 0 ${chartWidth} ${bleChartHeight}`}
+              role="img"
+              aria-label="Constant scan, advertise, and window intervals for fixed-rate BLE policy over time"
+            >
+              <rect x="0" y="0" width={chartWidth} height={bleChartHeight} rx="12" className="chart-background" />
+              <line
+                x1={chartPadding.left}
+                y1={chartPadding.top + fixedBleSummary.plotHeight}
+                x2={chartPadding.left + fixedBleSummary.plotWidth}
+                y2={chartPadding.top + fixedBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <line
+                x1={chartPadding.left}
+                y1={chartPadding.top}
+                x2={chartPadding.left}
+                y2={chartPadding.top + fixedBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <line
+                x1={chartPadding.left + fixedBleSummary.plotWidth}
+                y1={chartPadding.top}
+                x2={chartPadding.left + fixedBleSummary.plotWidth}
+                y2={chartPadding.top + fixedBleSummary.plotHeight}
+                className="chart-axis"
+              />
+              <text
+                className="chart-axis-title chart-axis-title-primary"
+                x={16}
+                y={chartPadding.top + fixedBleSummary.plotHeight / 2}
+                transform={`rotate(-90 16 ${chartPadding.top + fixedBleSummary.plotHeight / 2})`}
+                textAnchor="middle"
+              >
+                Seconds (schedule)
+              </text>
+              <text
+                className="chart-axis-title chart-axis-title-secondary"
+                x={chartWidth - 16}
+                y={chartPadding.top + fixedBleSummary.plotHeight / 2}
+                transform={`rotate(90 ${chartWidth - 16} ${chartPadding.top + fixedBleSummary.plotHeight / 2})`}
+                textAnchor="middle"
+              >
+                Duty (0–1)
+              </text>
+              {fixedBleSummary.secondTicks.map((tick) => {
+                const y =
+                  chartPadding.top +
+                  fixedBleSummary.plotHeight -
+                  (tick / fixedBleSummary.maxSeconds) * fixedBleSummary.plotHeight;
+                return (
+                  <text key={`fx-sec-${tick}`} x={chartPadding.left - 8} y={y + 4} className="chart-label chart-label-end">
+                    {formatTick(tick)}
+                  </text>
+                );
+              })}
+              {fixedBleSummary.dutyTicks.map((tick) => {
+                const y =
+                  chartPadding.top +
+                  fixedBleSummary.plotHeight -
+                  (tick / fixedBleSummary.maxDuty) * fixedBleSummary.plotHeight;
+                return (
+                  <text
+                    key={`fx-duty-${tick}`}
+                    x={chartPadding.left + fixedBleSummary.plotWidth + 8}
+                    y={y + 4}
+                    className="chart-label"
+                  >
+                    {formatTick(tick)}
+                  </text>
+                );
+              })}
+              {mainSummary.xTicks.map((tick) => {
+                const x = chartPadding.left + (tick / fixedBleSummary.maxTime) * fixedBleSummary.plotWidth;
+                const absoluteTime = startTimeSeconds + tick;
+                return (
+                  <g key={`ble-fixed-time-${tick}`}>
+                    <text x={x} y={bleChartHeight - 27} className="chart-label chart-label-middle chart-axis-time-of-day">
+                      {formatClockHHMM(absoluteTime)}
+                    </text>
+                    <text x={x} y={bleChartHeight - 15} className="chart-label chart-label-middle chart-axis-elapsed">
+                      {formatElapsedAxisTick(tick)}
+                    </text>
+                  </g>
+                );
+              })}
+              <path d={fixedBleSummary.scanIntervalPath} className="ble-fixed-scan-interval-line" fill="none" />
+              <path d={fixedBleSummary.advIntervalPath} className="ble-fixed-adv-interval-line" fill="none" />
+              <path d={fixedBleSummary.scanWindowPath} className="ble-fixed-scan-window-line" fill="none" />
+              <path d={fixedBleSummary.envelopeDutyPath} className="ble-fixed-duty-line" fill="none" />
+              <line
+                x1={fixedBleSummary.cursorX}
+                y1={chartPadding.top}
+                x2={fixedBleSummary.cursorX}
+                y2={chartPadding.top + fixedBleSummary.plotHeight}
+                className="current-time-line"
+              />
+            </svg>
+            <div className="chart-legend">
+              <span>
+                <i className="legend-swatch ble-legend-fixed-scan" /> scan interval (s)
+              </span>
+              <span>
+                <i className="legend-swatch ble-legend-fixed-adv" /> advertise interval (s)
+              </span>
+              <span>
+                <i className="legend-swatch ble-legend-fixed-window" /> scan window (s)
+              </span>
+              <span>
+                <i className="legend-swatch ble-legend-fixed-duty" /> envelope duty (0–1, right)
+              </span>
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -409,6 +683,107 @@ function createChartSummary(points: TimeSeriesPoint[], energy: EnergyLog[], curr
     movementPath,
     energyPath,
     cursorX
+  };
+}
+
+function createAdaptiveBleChartSummary(
+  series: AdaptiveBleTimePoint[],
+  points: TimeSeriesPoint[],
+  currentStep: number
+) {
+  const maxTime = Math.max(1, points.at(-1)?.time ?? 1);
+  const plotWidth = chartWidth - chartPadding.left - chartPadding.right;
+  const plotHeight = bleChartHeight - chartPadding.top - chartPadding.bottom;
+  const maxDrive = 1;
+  const maxScan = Math.max(1, ...series.map((point) => point.meanScanIntervalSeconds));
+  const drivePath =
+    series.length === 0
+      ? ""
+      : series
+          .map((point, index) => {
+            const x = chartPadding.left + (point.time / maxTime) * plotWidth;
+            const y = chartPadding.top + plotHeight - (point.meanSamplingDrive / maxDrive) * plotHeight;
+            return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+          })
+          .join(" ");
+  const scanPath =
+    series.length === 0
+      ? ""
+      : series
+          .map((point, index) => {
+            const x = chartPadding.left + (point.time / maxTime) * plotWidth;
+            const y = chartPadding.top + plotHeight - (point.meanScanIntervalSeconds / maxScan) * plotHeight;
+            return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+          })
+          .join(" ");
+  const neutralY = chartPadding.top + plotHeight - 0.5 * plotHeight;
+  const cursorX = chartPadding.left + ((points[currentStep]?.time ?? 0) / maxTime) * plotWidth;
+  return {
+    maxTime,
+    maxDrive,
+    maxScan,
+    plotWidth,
+    plotHeight,
+    neutralY,
+    cursorX,
+    drivePath,
+    scanPath,
+    driveTicks: createTicks(0, 1, 5),
+    scanTicks: createTicks(0, maxScan, 4)
+  };
+}
+
+function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSeriesPoint[], currentStep: number) {
+  const maxTime = Math.max(1, points.at(-1)?.time ?? 1);
+  const plotWidth = chartWidth - chartPadding.left - chartPadding.right;
+  const plotHeight = bleChartHeight - chartPadding.top - chartPadding.bottom;
+  if (series.length === 0) {
+    return {
+      hasPolicyRow: false,
+      maxTime,
+      plotWidth,
+      plotHeight,
+      maxSeconds: 1,
+      maxDuty: 1,
+      cursorX: chartPadding.left,
+      scanIntervalPath: "",
+      advIntervalPath: "",
+      scanWindowPath: "",
+      envelopeDutyPath: "",
+      secondTicks: createTicks(0, 1, 2),
+      dutyTicks: createTicks(0, 1, 2)
+    };
+  }
+  const row = series[0];
+  const hasPolicyRow = row.scanIntervalSeconds > 0 && row.advIntervalSeconds > 0;
+  const maxSeconds = Math.max(row.scanIntervalSeconds, row.advIntervalSeconds, row.scanWindowSeconds, 0.01) * 1.05;
+  const maxDuty = 1;
+  const yScan = chartPadding.top + plotHeight - (row.scanIntervalSeconds / maxSeconds) * plotHeight;
+  const yAdv = chartPadding.top + plotHeight - (row.advIntervalSeconds / maxSeconds) * plotHeight;
+  const yWin = chartPadding.top + plotHeight - (row.scanWindowSeconds / maxSeconds) * plotHeight;
+  const yDuty = chartPadding.top + plotHeight - (row.envelopeDuty / maxDuty) * plotHeight;
+  const pathAtY = (y: number) =>
+    series
+      .map((point, index) => {
+        const x = chartPadding.left + (point.time / maxTime) * plotWidth;
+        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
+  const cursorX = chartPadding.left + ((points[currentStep]?.time ?? 0) / maxTime) * plotWidth;
+  return {
+    hasPolicyRow,
+    maxTime,
+    plotWidth,
+    plotHeight,
+    maxSeconds,
+    maxDuty,
+    cursorX,
+    scanIntervalPath: pathAtY(yScan),
+    advIntervalPath: pathAtY(yAdv),
+    scanWindowPath: pathAtY(yWin),
+    envelopeDutyPath: pathAtY(yDuty),
+    secondTicks: createTicks(0, maxSeconds, 5),
+    dutyTicks: createTicks(0, maxDuty, 5)
   };
 }
 

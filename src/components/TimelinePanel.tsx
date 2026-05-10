@@ -1,3 +1,5 @@
+import { PLAYBACK_SPEED_MULTIPLIER } from "../playbackConstants";
+import { PauseIcon, PlayIcon, ResetTimelineIcon, StepForwardIcon } from "./playbackIcons";
 import { formatClockHHMM } from "../timeFormat";
 
 type TimelinePanelProps = {
@@ -6,7 +8,12 @@ type TimelinePanelProps = {
   timeSeconds: number;
   startTimeSeconds: number;
   timeStepSeconds: number;
+  isPlaying: boolean;
+  playbackDisabled: boolean;
   onStepChange: (step: number) => void;
+  onPlayPause: () => void;
+  onStep: () => void;
+  onReset: () => void;
 };
 
 export function TimelinePanel({
@@ -15,7 +22,12 @@ export function TimelinePanel({
   timeSeconds,
   startTimeSeconds,
   timeStepSeconds,
-  onStepChange
+  isPlaying,
+  playbackDisabled,
+  onStepChange,
+  onPlayPause,
+  onStep,
+  onReset
 }: TimelinePanelProps) {
   const clock = formatClockHHMM(startTimeSeconds + timeSeconds);
   const elapsed = formatElapsed(timeSeconds);
@@ -38,18 +50,54 @@ export function TimelinePanel({
         </div>
       </div>
 
-      <label>
-        Scrub simulation time: step {currentStep} / {totalSteps}
-        <input
-          type="range"
-          min="0"
-          max={totalSteps}
-          step="1"
-          value={currentStep}
-          onChange={(event) => onStepChange(Number(event.target.value))}
-        />
-      </label>
-      <p className="helper-text">Each slider step advances {timeStepSeconds} simulated seconds.</p>
+      <div className="timeline-scrub-row">
+        <div className="timeline-playback" role="group" aria-label="Playback controls">
+          <button
+            type="button"
+            className="icon-button"
+            disabled={playbackDisabled}
+            onClick={onPlayPause}
+            aria-label={isPlaying ? "Pause" : "Play"}
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            disabled={playbackDisabled}
+            onClick={onStep}
+            aria-label="Step forward one timestep"
+            title="Step"
+          >
+            <StepForwardIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            disabled={playbackDisabled}
+            onClick={onReset}
+            aria-label="Jump to start of timeline"
+            title="Reset"
+          >
+            <ResetTimelineIcon />
+          </button>
+        </div>
+        <label className="timeline-scrub-label">
+          Scrub simulation time: step {currentStep} / {totalSteps}
+          <input
+            type="range"
+            min="0"
+            max={totalSteps}
+            step="1"
+            value={currentStep}
+            onChange={(event) => onStepChange(Number(event.target.value))}
+          />
+        </label>
+      </div>
+      <p className="helper-text timeline-playback-hint">
+        Each slider step advances {timeStepSeconds} simulated seconds. Playback is {PLAYBACK_SPEED_MULTIPLIER}x speed.
+      </p>
     </section>
   );
 }

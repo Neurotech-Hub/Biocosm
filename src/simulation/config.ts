@@ -57,8 +57,8 @@ export const defaultSimulationConfig: SimulationConfig = {
   pathNodeCount: 10,
   enclosure: {
     mode: "rectangle",
-    width: 10,
-    height: 10,
+    width: 20,
+    height: 20,
     boundaryBehavior: "constrain"
   },
   behavior: {
@@ -82,6 +82,7 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   radio: {
     detectionRadiusMeters: 1,
+    opportunitySampleStepSeconds: 1,
     socialRadiusMeters: 1,
     rssiAtOneMeter: -60,
     pathLossExponent: 2,
@@ -111,17 +112,33 @@ export const defaultAdaptivePolicy = {
   id: "motion-peer-adaptive",
   type: "motion_peer_adaptive",
   name: "Motion + peer adaptive BLE",
-  scanIntervalMinSeconds: 10,
-  scanIntervalMaxSeconds: 60,
-  scanWindowMinSeconds: 0.5,
-  scanWindowMaxSeconds: 1.5,
-  advIntervalMinSeconds: 5,
-  advIntervalMaxSeconds: 50,
-  tauMotionSeconds: 10 * 60,
-  tauPeerSeconds: 30 * 60,
-  motionGain: 0.2,
-  peerGain: 0.35,
-  motionWeight: 0.5,
-  peerWeight: 0.5,
-  advertisingBurstDurationSeconds: 2
+  timingAnchors: {
+    lowIntensity: {
+      scanIntervalSeconds: 60,
+      scanWindowSeconds: 0.5,
+      advIntervalSeconds: 20
+    },
+    neutral: {
+      scanIntervalSeconds: juxtaMainCMode0FixedPolicy.scanIntervalSeconds,
+      scanWindowSeconds: juxtaMainCMode0FixedPolicy.scanWindowSeconds,
+      advIntervalSeconds: juxtaMainCMode0FixedPolicy.advIntervalSeconds
+    },
+    highIntensity: {
+      scanIntervalSeconds: 5,
+      scanWindowSeconds: 3,
+      advIntervalSeconds: 1
+    },
+    advertisingBurstDurationSeconds: juxtaMainCMode0FixedPolicy.advertisingBurstDurationSeconds ?? 2
+  },
+  baselineDrive: 0.25,
+  tauMotionSeconds: 180,
+  tauPeerSeconds: 900,
+  motionGain: 0.35,
+  peerGain: 0.45,
+  peerMissPenalty: 0.2,
+  motionWeight: 0.45,
+  peerWeight: 0.55,
+  peerDetectionCountSaturation: 1,
+  motionEventCountSaturation: 1,
+  allowEnergySavingDownscale: true
 } as const;

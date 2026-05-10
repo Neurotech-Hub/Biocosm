@@ -1,7 +1,8 @@
+import { summarizeDyadEpoch } from "./dyadEpoch";
 import { getEdge, interpolateEdge } from "./geometry";
 import { computeEnergyLog } from "./energy";
 import { computeMotionObservations } from "./motionSensor";
-import { applyFirmwarePolicy } from "./policies/adaptive";
+import { adaptivePolicyInputsForAnimal, applyFirmwarePolicy, combinedEnvelopeDuty } from "./policies/adaptive";
 import { SeededRandom } from "./random";
 import {
   computeTrueContacts,
@@ -15,11 +16,13 @@ import type {
   Animal,
   AnimalObservation,
   AnimalStateLog,
+  AdaptiveBlePolicyLog,
   BleBurstEvent,
   CollarStateLog,
   DetectionEvent,
   ScanWindowEvent,
   ScanWindowLog,
+  SimulationLogs,
   SimulationState,
   TrueContact,
   TrueDyadLog
@@ -47,6 +50,7 @@ export function stepSimulation(state: SimulationState): SimulationState {
         collarValid: animal.collar.valid
       },
       state.detections,
+      state.scanWindows,
       time,
       dtSeconds
     )
@@ -80,10 +84,26 @@ export function stepSimulation(state: SimulationState): SimulationState {
   const energy = computeEnergyLog(time, dtSeconds, energyBursts, state.config.energy, state.energy.cumulativeMah);
   const frameLogs = {
     animalStates: createAnimalStateLogs(time, animalsWithBurstState, observations),
-    trueDyads: createTrueDyadLogs(trueContacts, animalsWithBurstState),
+    trueDyads: createTrueDyadLogs(
+      trueContacts,
+      animalsAtEpochStart,
+      animalsWithBurstState,
+      state.config.radio,
+      epochStart,
+      time
+    ),
     detections,
     bleBursts,
     scanWindows,
+    adaptiveBlePolicy: createAdaptiveBlePolicyLogs(
+      epochStart,
+      time,
+      animalsWithBurstState,
+      observations,
+      state.detections,
+      state.scanWindows,
+      state.config.activePolicy
+    ),
     collarStates: createCollarStateLogs(time, animalsWithBurstState),
     energy: [energy]
   };
@@ -115,6 +135,26 @@ export function runSimulation(initialState: SimulationState, steps: number): Sim
   return state;
 }
 
+/** Full horizon run with merged logs and full timeline (for sweep / batch analysis). */
+export function runSimulationToEnd(initialState: SimulationState): {
+  finalState: SimulationState;
+  mergedLogs: SimulationLogs;
+  timeline: SimulationState[];
+} {
+  const timeline: SimulationState[] = [initialState];
+  let logs = initialState.logs;
+  const totalSteps = Math.floor(initialState.config.simulationLengthSeconds / initialState.config.timeStepSeconds);
+  let current = initialState;
+
+  for (let step = 0; step < totalSteps; step += 1) {
+    current = stepSimulation(current);
+    logs = mergeLogs(logs, current.logs);
+    timeline.push(current);
+  }
+
+  return { finalState: current, mergedLogs: logs, timeline };
+}
+
 export function mergeLogs(left: SimulationState["logs"], right: SimulationState["logs"]): SimulationState["logs"] {
   return {
     animalStates: [...left.animalStates, ...right.animalStates],
@@ -122,6 +162,7 @@ export function mergeLogs(left: SimulationState["logs"], right: SimulationState[
     detections: [...left.detections, ...right.detections],
     bleBursts: [...left.bleBursts, ...right.bleBursts],
     scanWindows: [...left.scanWindows, ...right.scanWindows],
+    adaptiveBlePolicy: [...left.adaptiveBlePolicy, ...right.adaptiveBlePolicy],
     collarStates: [...left.collarStates, ...right.collarStates],
     energy: [...left.energy, ...right.energy]
   };
@@ -274,14 +315,39 @@ function createAnimalStateLogs(
   });
 }
 
-function createTrueDyadLogs(trueContacts: TrueContact[], animals: Animal[]): TrueDyadLog[] {
-  const animalById = new Map(animals.map((animal) => [animal.id, animal]));
+function createTrueDyadLogs(
+  trueContacts: TrueContact[],
+  animalsAtEpochStart: Animal[],
+  animalsAtEpochEnd: Animal[],
+  radio: SimulationState["config"]["radio"],
+  epochStart: number,
+  epochEnd: number
+): TrueDyadLog[] {
+  const startAnimalById = new Map(animalsAtEpochStart.map((animal) => [animal.id, animal]));
+  const endAnimalById = new Map(animalsAtEpochEnd.map((animal) => [animal.id, animal]));
   return trueContacts.map((contact) => {
-    const animalA = animalById.get(contact.animalA);
-    const animalB = animalById.get(contact.animalB);
+    const animalAStart = startAnimalById.get(contact.animalA);
+    const animalBStart = startAnimalById.get(contact.animalB);
+    const animalAEnd = endAnimalById.get(contact.animalA);
+    const animalBEnd = endAnimalById.get(contact.animalB);
+    const epochSummary =
+      animalAStart && animalBStart && animalAEnd && animalBEnd
+        ? summarizeDyadEpoch(animalAStart, animalAEnd, animalBStart, animalBEnd, epochStart, epochEnd, radio)
+        : {
+            withinDetectionRadiusAny: contact.withinDetectionRadius,
+            inRangeSeconds: contact.withinDetectionRadius ? Math.max(0, epochEnd - epochStart) : 0,
+            minDistanceMeters: contact.distance
+          };
     return {
       ...contact,
-      bothCollarsValid: Boolean(animalA?.collar.valid && animalB?.collar.valid)
+      epochStartTime: epochStart,
+      epochEndTime: epochEnd,
+      bothCollarsValid: Boolean(animalAEnd?.collar.valid && animalBEnd?.collar.valid),
+      withinDetectionRadiusAtEnd: contact.withinDetectionRadius,
+      withinDetectionRadiusAny: epochSummary.withinDetectionRadiusAny,
+      inRangeSeconds: epochSummary.inRangeSeconds,
+      minDistanceMeters: epochSummary.minDistanceMeters,
+      endDistanceMeters: contact.distance
     };
   });
 }
@@ -302,4 +368,49 @@ function createCollarStateLogs(time: number, animals: Animal[]): CollarStateLog[
     peerDrive: animal.collar.peerDrive,
     samplingDrive: animal.collar.samplingDrive
   }));
+}
+
+function createAdaptiveBlePolicyLogs(
+  epochStartTime: number,
+  epochEndTime: number,
+  animals: Animal[],
+  observations: AnimalObservation[],
+  previousDetections: DetectionEvent[],
+  previousScanWindows: ScanWindowLog[],
+  policy: SimulationState["config"]["activePolicy"]
+): AdaptiveBlePolicyLog[] {
+  if (policy.type !== "motion_peer_adaptive") {
+    return [];
+  }
+
+  const observationByAnimal = new Map(observations.map((observation) => [observation.animalId, observation]));
+  return animals.map((animal) => {
+    const inputs = adaptivePolicyInputsForAnimal(animal.id, previousDetections, previousScanWindows);
+    const observation = observationByAnimal.get(animal.id);
+    const timing = animal.collar;
+    const duty = combinedEnvelopeDuty(timing);
+
+    return {
+      time: epochEndTime,
+      epochStartTime,
+      epochEndTime,
+      animalId: animal.id,
+      motionDetected: observation?.motionDetected ?? false,
+      motionEventCount: observation?.motionDetected ? 1 : 0,
+      localPeerDetectionCount: inputs.localPeerDetectionsLastEpoch.length,
+      observerScannedWithoutPeer: inputs.observerScannedWithoutPeerLastEpoch,
+      baselineContribution: policy.baselineDrive,
+      motionContribution: policy.motionWeight * timing.motionDrive,
+      peerContribution: policy.peerWeight * timing.peerDrive,
+      motionDrive: timing.motionDrive,
+      peerDrive: timing.peerDrive,
+      samplingDrive: timing.samplingDrive,
+      scanIntervalSeconds: timing.scanIntervalSeconds,
+      scanWindowSeconds: timing.scanWindowSeconds,
+      advIntervalSeconds: timing.advIntervalSeconds,
+      advertisingBurstDurationSeconds: timing.advertisingBurstDurationSeconds,
+      combinedEnvelopeDuty: duty,
+      saturatedScheduleWarning: duty > 0.8
+    };
+  });
 }

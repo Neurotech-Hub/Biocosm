@@ -1,3 +1,4 @@
+import { adaptiveSamplingDrive } from "./policies/adaptive";
 import type { SimulationLogs, SimulationState } from "./types";
 
 export type TimeSeriesPoint = {
@@ -99,6 +100,69 @@ export function decimateMovementStripEvents(events: AnimalStripEvent[], maxDotsP
   }
 
   return out;
+}
+
+/** Cohort-mean adaptive BLE state per simulation timestep (for analysis plots). */
+export type AdaptiveBleTimePoint = {
+  time: number;
+  meanSamplingDrive: number;
+  meanScanIntervalSeconds: number;
+};
+
+/** Fixed-rate schedule copied from policy (flat series over time). */
+export type FixedBleTimePoint = {
+  time: number;
+  scanIntervalSeconds: number;
+  advIntervalSeconds: number;
+  scanWindowSeconds: number;
+  envelopeDuty: number;
+};
+
+export function buildAdaptiveBleTimeSeries(timeline: SimulationState[]): AdaptiveBleTimePoint[] {
+  return timeline.map((state) => {
+    const policy = state.config.activePolicy;
+    const n = Math.max(1, state.animals.length);
+    if (policy.type !== "motion_peer_adaptive") {
+      return { time: state.time, meanSamplingDrive: 0, meanScanIntervalSeconds: 0 };
+    }
+    let sumDrive = 0;
+    let sumScan = 0;
+    for (const animal of state.animals) {
+      sumDrive += adaptiveSamplingDrive(policy, animal.collar.motionDrive, animal.collar.peerDrive);
+      sumScan += animal.collar.scanIntervalSeconds;
+    }
+    return {
+      time: state.time,
+      meanSamplingDrive: sumDrive / n,
+      meanScanIntervalSeconds: sumScan / n
+    };
+  });
+}
+
+export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTimePoint[] {
+  if (timeline.length === 0) {
+    return [];
+  }
+  const policy = timeline[0].config.activePolicy;
+  if (policy.type !== "fixed") {
+    return timeline.map((state) => ({
+      time: state.time,
+      scanIntervalSeconds: 0,
+      advIntervalSeconds: 0,
+      scanWindowSeconds: 0,
+      envelopeDuty: 0
+    }));
+  }
+  const advBurst = policy.advertisingBurstDurationSeconds ?? 2;
+  const envelopeDuty =
+    policy.scanWindowSeconds / policy.scanIntervalSeconds + advBurst / policy.advIntervalSeconds;
+  return timeline.map((state) => ({
+    time: state.time,
+    scanIntervalSeconds: policy.scanIntervalSeconds,
+    advIntervalSeconds: policy.advIntervalSeconds,
+    scanWindowSeconds: policy.scanWindowSeconds,
+    envelopeDuty
+  }));
 }
 
 export function buildTimeSeries(timeline: SimulationState[]): TimeSeriesPoint[] {

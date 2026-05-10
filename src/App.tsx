@@ -1,24 +1,42 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AssumptionsPanel } from "./components/AssumptionsPanel";
+import { AdaptivePolicyMiniPanel } from "./components/AdaptivePolicyMiniPanel";
 import { CanvasVisualizer } from "./components/CanvasVisualizer";
 import { ControlsPanel } from "./components/ControlsPanel";
 import { LegendPanel } from "./components/LegendPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { RawDataPanel } from "./components/RawDataPanel";
+import { SweepControlsPanel } from "./components/SweepControlsPanel";
+import { SweepReportPanel } from "./components/SweepReportPanel";
 import { TimeSeriesPanel } from "./components/TimeSeriesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
 import { computeMetrics } from "./simulation/analysis";
 import { defaultSimulationConfig } from "./simulation/config";
 import { mergeLogs, stepSimulation } from "./simulation/engine";
 import {
+  buildSweepTrials,
+  finalizeSweepBundle,
+  runSweepTrialsChunked,
+  sweepAdaptivePolicyFromGrid,
+  type SweepResultBundle
+} from "./simulation/sweep/adaptiveBleSweep";
+import type { CandidatePick, SweepPolicySummary } from "./simulation/sweep/sweepCandidates";
+import {
+  buildAdaptiveBleTimeSeries,
   buildAnimalStripEvents,
+  buildFixedBleTimeSeries,
   buildTimeSeries,
   sortedAnimalIdsFromLogs,
   type AnimalStripEvent,
   type TimeSeriesPoint
 } from "./simulation/timeSeries";
 import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationState } from "./simulation/types";
+import { PLAYBACK_SPEED_MULTIPLIER } from "./playbackConstants";
 import { createInitialSimulation } from "./simulation/world";
+
+type SweepBundleWithCandidates = SweepResultBundle & { candidates: CandidatePick[] };
+
+type WorkspaceTab = "simulator" | "sweep";
 
 export function App() {
   const [draftConfig, setDraftConfig] = useState<SimulationConfig>(defaultSimulationConfig);
@@ -28,9 +46,15 @@ export function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuildDirty, setIsBuildDirty] = useState(false);
   const [buildProgress, setBuildProgress] = useState<BuildProgress>({ isBuilding: false, percent: 100 });
-  const [speed, setSpeed] = useState(10);
   const [showTrueProximity, setShowTrueProximity] = useState(true);
   const [showObservedDetections, setShowObservedDetections] = useState(true);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("simulator");
+  const [sweepMode, setSweepMode] = useState<"fast" | "report">("fast");
+  const [sweepRunning, setSweepRunning] = useState(false);
+  const [sweepProgress, setSweepProgress] = useState({ completed: 0, total: 0 });
+  const [sweepResult, setSweepResult] = useState<SweepBundleWithCandidates | null>(null);
+  const [sweepError, setSweepError] = useState<string | null>(null);
+  const sweepAbortRef = useRef<AbortController | null>(null);
   const timeline = build.timeline;
   const simulation = timeline[currentStep] ?? timeline[0];
   const totalSteps = Math.max(0, timeline.length - 1);
@@ -48,25 +72,103 @@ export function App() {
         }
         return step + 1;
       });
-    }, Math.max(30, 1000 / speed));
+    }, Math.max(30, 1000 / PLAYBACK_SPEED_MULTIPLIER));
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, speed, totalSteps]);
+  }, [isPlaying, totalSteps]);
+
+  const runSweep = async () => {
+    setSweepError(null);
+    setSweepResult(null);
+    const trials = buildSweepTrials(sweepMode, String(builtConfig.seed));
+    setSweepProgress({ completed: 0, total: trials.length });
+    setSweepRunning(true);
+    const controller = new AbortController();
+    sweepAbortRef.current = controller;
+
+    try {
+      const rows = await runSweepTrialsChunked(builtConfig, trials, {
+        signal: controller.signal,
+        onProgress: (completed, total) => setSweepProgress({ completed, total })
+      });
+      setSweepResult(finalizeSweepBundle(rows, sweepMode));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setSweepError("Sweep cancelled.");
+      } else {
+        setSweepError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setSweepRunning(false);
+      sweepAbortRef.current = null;
+    }
+  };
+
+  const cancelSweep = () => {
+    sweepAbortRef.current?.abort();
+  };
+
+  const simulateSweepPolicy = (summary: SweepPolicySummary) => {
+    if (!summary.params || buildProgress.isBuilding) {
+      return;
+    }
+    const policy = sweepAdaptivePolicyFromGrid(
+      summary.params.baselineDrive,
+      summary.params.motionWeight,
+      summary.params.peerWeight,
+      summary.params.tauPeerSeconds
+    );
+    setDraftConfig({ ...builtConfig, activePolicy: policy });
+    setIsBuildDirty(true);
+    setIsPlaying(false);
+    setCurrentStep(0);
+    setWorkspaceTab("simulator");
+  };
+
+  const navStatusLabel = buildProgress.isBuilding
+    ? `Building ${buildProgress.percent}%`
+    : isBuildDirty
+      ? "Draft settings — rebuild to apply"
+      : "Built";
 
   return (
     <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Adaptive Social Proximity Logger Simulator</h1>
-          <p>Phase 1: deterministic world truth, fixed-rate BLE observations, and live true-vs-observed review.</p>
+      <header className="app-topnav">
+        <div className="app-topnav-brand">
+          <span className="app-topnav-title">Biocosm</span>
+          <span className="app-topnav-subtitle">A Realistic Animal Simulator for Wearable Design</span>
         </div>
-        <div className="header-pill">
-          {buildProgress.isBuilding
-            ? `Building ${buildProgress.percent}%`
-            : `Built seed: ${builtConfig.seed}${isBuildDirty ? " (settings changed)" : ""}`}
+
+        <div className="app-topnav-end">
+          <nav className="app-topnav-tabs" aria-label="Primary workspace">
+            <button
+              type="button"
+              className={`app-topnav-tab ${workspaceTab === "simulator" ? "app-topnav-tab-active" : ""}`}
+              aria-current={workspaceTab === "simulator" ? "page" : undefined}
+              onClick={() => setWorkspaceTab("simulator")}
+            >
+              Simulator
+            </button>
+            <button
+              type="button"
+              className={`app-topnav-tab ${workspaceTab === "sweep" ? "app-topnav-tab-active" : ""}`}
+              aria-current={workspaceTab === "sweep" ? "page" : undefined}
+              onClick={() => setWorkspaceTab("sweep")}
+            >
+              Sweep report
+            </button>
+          </nav>
+
+          <div className="app-topnav-meta" title="Last built simulation — sweeps use this world configuration">
+            <span className="app-topnav-meta-seed">Seed {builtConfig.seed}</span>
+            <span className="app-topnav-meta-status" aria-live="polite">
+              {navStatusLabel}
+            </span>
+          </div>
         </div>
       </header>
 
+      {workspaceTab === "simulator" ? (
       <section className="workspace">
         <div className="visual-column">
           <TimelinePanel
@@ -75,9 +177,24 @@ export function App() {
             timeSeconds={simulation.time}
             startTimeSeconds={builtConfig.startTimeSeconds}
             timeStepSeconds={builtConfig.timeStepSeconds}
+            isPlaying={isPlaying}
+            playbackDisabled={buildProgress.isBuilding}
             onStepChange={(step) => {
               setIsPlaying(false);
               setCurrentStep(step);
+            }}
+            onPlayPause={() => {
+              if (!buildProgress.isBuilding) {
+                setIsPlaying((playing) => !playing);
+              }
+            }}
+            onReset={() => {
+              setIsPlaying(false);
+              setCurrentStep(0);
+            }}
+            onStep={() => {
+              setIsPlaying(false);
+              setCurrentStep((step) => Math.min(totalSteps, step + 1));
             }}
           />
           <CanvasVisualizer
@@ -89,69 +206,90 @@ export function App() {
           <TimeSeriesPanel
             points={build.timeSeries}
             energy={build.logs.energy}
+            adaptiveBleSeries={build.adaptiveBleTimeSeries}
+            fixedBleSeries={build.fixedBleTimeSeries}
+            activePolicyType={builtConfig.activePolicy.type}
             currentStep={currentStep}
             animalStripEvents={build.animalStripEvents}
             animalIds={build.animalIdsStripOrder}
             startTimeSeconds={builtConfig.startTimeSeconds}
           />
           <MetricsPanel metrics={build.metrics} animalCount={builtConfig.animalCount} />
-          <RawDataPanel logs={build.logs} config={builtConfig} timeline={build.timeline} />
+          <RawDataPanel logs={build.logs} config={builtConfig} metrics={build.metrics} timeline={build.timeline} />
           <AssumptionsPanel config={builtConfig} />
         </div>
-        <ControlsPanel
-          config={draftConfig}
-          isBuildDirty={isBuildDirty}
-          buildProgress={buildProgress}
-          isPlaying={isPlaying}
-          speed={speed}
-          showTrueProximity={showTrueProximity}
-          showObservedDetections={showObservedDetections}
-          onConfigChange={(nextConfig) => {
-            setDraftConfig(nextConfig);
-            setIsBuildDirty(true);
-            setIsPlaying(false);
-          }}
-          onBuildSimulation={() => {
-            if (buildProgress.isBuilding) {
-              return;
-            }
+        <div className="sidebar-column">
+          <ControlsPanel
+            config={draftConfig}
+            isBuildDirty={isBuildDirty}
+            buildProgress={buildProgress}
+            showTrueProximity={showTrueProximity}
+            showObservedDetections={showObservedDetections}
+            onConfigChange={(nextConfig) => {
+              setDraftConfig(nextConfig);
+              setIsBuildDirty(true);
+              setIsPlaying(false);
+            }}
+            onResetSettingsToDefaults={() => {
+              setDraftConfig(structuredClone(defaultSimulationConfig));
+              setIsBuildDirty(true);
+              setIsPlaying(false);
+            }}
+            onBuildSimulation={() => {
+              if (buildProgress.isBuilding) {
+                return;
+              }
 
-            setIsPlaying(false);
-            setBuildProgress({ isBuilding: true, percent: 0 });
-            const configToBuild = draftConfig;
+              setIsPlaying(false);
+              setBuildProgress({ isBuilding: true, percent: 0 });
+              const configToBuild = draftConfig;
 
-            window.setTimeout(() => {
-              createTimelineAsync(
-                createInitialSimulation(configToBuild),
-                (percent) => setBuildProgress({ isBuilding: true, percent }),
-                (nextBuild) => {
-                  setBuiltConfig(configToBuild);
-                  setBuild(nextBuild);
-                  setCurrentStep(0);
-                  setIsBuildDirty(false);
-                  setBuildProgress({ isBuilding: false, percent: 100 });
-                }
-              );
-            }, 0);
-          }}
-          onPlayPause={() => {
-            if (!buildProgress.isBuilding) {
-              setIsPlaying((playing) => !playing);
-            }
-          }}
-          onReset={() => {
-            setIsPlaying(false);
-            setCurrentStep(0);
-          }}
-          onStep={() => {
-            setIsPlaying(false);
-            setCurrentStep((step) => Math.min(totalSteps, step + 1));
-          }}
-          onSpeedChange={setSpeed}
-          onShowTrueProximityChange={setShowTrueProximity}
-          onShowObservedDetectionsChange={setShowObservedDetections}
-        />
+              window.setTimeout(() => {
+                createTimelineAsync(
+                  createInitialSimulation(configToBuild),
+                  (percent) => setBuildProgress({ isBuilding: true, percent }),
+                  (nextBuild) => {
+                    setBuiltConfig(configToBuild);
+                    setBuild(nextBuild);
+                    setCurrentStep(0);
+                    setIsBuildDirty(false);
+                    setBuildProgress({ isBuilding: false, percent: 100 });
+                  }
+                );
+              }, 0);
+            }}
+            onShowTrueProximityChange={setShowTrueProximity}
+            onShowObservedDetectionsChange={setShowObservedDetections}
+            onOpenSweepReport={() => setWorkspaceTab("sweep")}
+          />
+          <AdaptivePolicyMiniPanel state={simulation} timeline={timeline} />
+        </div>
       </section>
+      ) : (
+      <section className="workspace workspace-sweep-layout">
+        <div className="visual-column">
+          <SweepReportPanel
+            baseConfig={builtConfig}
+            sweepResult={sweepResult}
+            simulateDisabled={buildProgress.isBuilding}
+            onSimulatePolicy={simulateSweepPolicy}
+          />
+        </div>
+        <div className="sidebar-column">
+          <SweepControlsPanel
+            builtSimulation={builtConfig}
+            isSimulationStale={isBuildDirty}
+            sweepMode={sweepMode}
+            onSweepModeChange={setSweepMode}
+            isSweepRunning={sweepRunning}
+            sweepProgress={sweepProgress}
+            sweepError={sweepError}
+            onRunSweep={runSweep}
+            onCancelSweep={cancelSweep}
+          />
+        </div>
+      </section>
+      )}
     </main>
   );
 }
@@ -165,6 +303,8 @@ type SimulationBuild = {
   timeline: SimulationState[];
   logs: SimulationLogs;
   timeSeries: TimeSeriesPoint[];
+  adaptiveBleTimeSeries: ReturnType<typeof buildAdaptiveBleTimeSeries>;
+  fixedBleTimeSeries: ReturnType<typeof buildFixedBleTimeSeries>;
   animalStripEvents: AnimalStripEvent[];
   animalIdsStripOrder: string[];
   metrics: SimulationMetrics;
@@ -186,6 +326,8 @@ function createSimulationBuild(initialState: SimulationState): SimulationBuild {
     timeline,
     logs,
     timeSeries: buildTimeSeries(timeline),
+    adaptiveBleTimeSeries: buildAdaptiveBleTimeSeries(timeline),
+    fixedBleTimeSeries: buildFixedBleTimeSeries(timeline),
     animalStripEvents: buildAnimalStripEvents(logs),
     animalIdsStripOrder: sortedAnimalIdsFromLogs(logs),
     metrics: computeMetrics(current, logs)
@@ -223,6 +365,8 @@ function createTimelineAsync(
       timeline,
       logs,
       timeSeries: buildTimeSeries(timeline),
+      adaptiveBleTimeSeries: buildAdaptiveBleTimeSeries(timeline),
+      fixedBleTimeSeries: buildFixedBleTimeSeries(timeline),
       animalStripEvents: buildAnimalStripEvents(logs),
       animalIdsStripOrder: sortedAnimalIdsFromLogs(logs),
       metrics: computeMetrics(current, logs)

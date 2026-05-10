@@ -1,12 +1,18 @@
 import { computeMetrics, computeMetricsFromLogs } from "./analysis";
 import { defaultAdaptivePolicy, defaultSimulationConfig } from "./config";
+import { summarizeDyadEpoch } from "./dyadEpoch";
 import { computeEnergyLog, estimateLipoVoltage } from "./energy";
 import { runSimulation, stepSimulation } from "./engine";
 import { computeMotionObservations } from "./motionSensor";
-import { applyMotionPeerAdaptivePolicy, logInterpolate } from "./policies/adaptive";
+import {
+  adaptivePolicyInputsForAnimal,
+  applyMotionPeerAdaptivePolicy,
+  logInterpolate,
+  mapAdaptiveTiming
+} from "./policies/adaptive";
 import { createBleBurstEvents, simulateBleDetections } from "./radio";
 import { SeededRandom } from "./random";
-import type { AnimalStateLog, SimulationConfig } from "./types";
+import type { Animal, AnimalStateLog, SimulationConfig, TrueDyadLog } from "./types";
 import { chooseBehaviorState, createInitialSimulation } from "./world";
 
 describe("simulation engine", () => {
@@ -159,15 +165,7 @@ describe("simulation engine", () => {
       animalStates: [],
       collarStates: [],
       trueDyads: [
-        {
-          time: 60,
-          animalA: "animal-1",
-          animalB: "animal-2",
-          distance: 0.4,
-          withinDetectionRadius: true,
-          withinSocialRadius: true,
-          bothCollarsValid: true
-        }
+        trueDyadLog({ time: 60, animalA: "animal-1", animalB: "animal-2", distance: 0.4 })
       ],
       detections: [
         {
@@ -190,13 +188,14 @@ describe("simulation engine", () => {
           detectedAnyPeer: true
         }
       ],
+      adaptiveBlePolicy: [],
       energy: []
     });
 
     expect(metrics.trueContactSteps).toBe(1);
     expect(metrics.observedDetections).toBe(1);
     expect(metrics.uniqueObservedDyads).toBe(1);
-    expect(metrics.recallEstimate).toBe(1);
+    expect(metrics.rawDetectionDensity).toBe(1);
   });
 
   it("computes scan and advertising summaries from build-level logs", () => {
@@ -392,6 +391,93 @@ describe("simulation engine", () => {
     expect(metrics.bleCaptureRate).toBeGreaterThanOrEqual(0);
   });
 
+  it("counts an opportunity when animals are in range only at the epoch start", () => {
+    const radio = { ...defaultSimulationConfig.radio, detectionRadiusMeters: 1, opportunitySampleStepSeconds: 1 };
+    const summary = summarizeDyadEpoch(
+      animalAt("animal-1", 0, 0),
+      animalAt("animal-1", 10, 0),
+      animalAt("animal-2", 0.5, 0),
+      animalAt("animal-2", 20, 0),
+      0,
+      60,
+      radio
+    );
+
+    expect(summary.withinDetectionRadiusAny).toBe(true);
+  });
+
+  it("counts an opportunity when animals are in range only mid-epoch", () => {
+    const radio = { ...defaultSimulationConfig.radio, detectionRadiusMeters: 1, opportunitySampleStepSeconds: 1 };
+    const summary = summarizeDyadEpoch(
+      animalAt("animal-1", 0, 0),
+      animalAt("animal-1", 10, 0),
+      animalAt("animal-2", 10, 0),
+      animalAt("animal-2", 0, 0),
+      0,
+      60,
+      radio
+    );
+
+    expect(summary.withinDetectionRadiusAny).toBe(true);
+    expect(summary.minDistanceMeters).toBeLessThanOrEqual(1);
+  });
+
+  it("does not count an opportunity when animals are never in range", () => {
+    const radio = { ...defaultSimulationConfig.radio, detectionRadiusMeters: 1, opportunitySampleStepSeconds: 1 };
+    const summary = summarizeDyadEpoch(
+      animalAt("animal-1", 0, 0),
+      animalAt("animal-1", 1, 0),
+      animalAt("animal-2", 5, 0),
+      animalAt("animal-2", 6, 0),
+      0,
+      60,
+      radio
+    );
+
+    expect(summary.withinDetectionRadiusAny).toBe(false);
+  });
+
+  it("counts same-epoch unordered detections as BLE capture hits", () => {
+    const metrics = computeMetricsFromLogs({
+      animalStates: [],
+      collarStates: [],
+      trueDyads: [trueDyadLog({ time: 60, animalA: "animal-1", animalB: "animal-2", distance: 3, withinDetectionRadiusAny: true })],
+      detections: [
+        {
+          time: 30,
+          observerId: "animal-2",
+          peerId: "animal-1",
+          trueDistance: 0.5,
+          rssi: -50,
+          scanPolicyId: "fixed-rate"
+        }
+      ],
+      bleBursts: [],
+      scanWindows: [],
+      adaptiveBlePolicy: [],
+      energy: []
+    });
+    const state = createInitialSimulation(testConfig({ animalCount: 2 }));
+    const fullMetrics = computeMetrics(state, {
+      ...state.logs,
+      trueDyads: [trueDyadLog({ time: 60, animalA: "animal-1", animalB: "animal-2", distance: 3, withinDetectionRadiusAny: true })],
+      detections: [
+        {
+          time: 30,
+          observerId: "animal-2",
+          peerId: "animal-1",
+          trueDistance: 0.5,
+          rssi: -50,
+          scanPolicyId: "fixed-rate"
+        }
+      ]
+    });
+
+    expect(metrics.rawDetectionDensity).toBe(1);
+    expect(fullMetrics.bleCaptureHits).toBe(1);
+    expect(fullMetrics.bleCaptureOpportunities).toBe(1);
+  });
+
   it("computes deterministic energy use and LiPo voltage", () => {
     const energy = computeEnergyLog(
       60,
@@ -414,10 +500,43 @@ describe("simulation engine", () => {
     expect(logInterpolate(300, 10, 0.5)).toBeLessThan(300);
   });
 
-  it("increases adaptive motion and peer drive from observations and recent detections", () => {
+  it("maps adaptive timing around the fixed-rate neutral anchor", () => {
+    const low = mapAdaptiveTiming(0.25, defaultAdaptivePolicy.timingAnchors);
+    const neutral = mapAdaptiveTiming(0.5, defaultAdaptivePolicy.timingAnchors);
+    const high = mapAdaptiveTiming(0.75, defaultAdaptivePolicy.timingAnchors);
+
+    expect(neutral.scanIntervalSeconds).toBeCloseTo(20);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(1.5);
+    expect(neutral.advIntervalSeconds).toBeCloseTo(5);
+    expect(low.scanIntervalSeconds).toBeGreaterThan(20);
+    expect(low.scanWindowSeconds).toBeLessThan(1.5);
+    expect(low.advIntervalSeconds).toBeGreaterThan(5);
+    expect(high.scanIntervalSeconds).toBeLessThan(20);
+    expect(high.scanWindowSeconds).toBeGreaterThan(1.5);
+    expect(high.advIntervalSeconds).toBeLessThan(5);
+  });
+
+  it("increases adaptive motion drive and sampling drive from motion", () => {
     const config = testConfig({ activePolicy: { ...defaultAdaptivePolicy } });
     const animal = createInitialSimulation(config).animals[0];
-    const updated = applyMotionPeerAdaptivePolicy(
+    const withoutMotion = applyMotionPeerAdaptivePolicy(
+      animal,
+      defaultAdaptivePolicy,
+      {
+        time: 60,
+        animalId: animal.id,
+        motionDetected: false,
+        motionMagnitude: 0,
+        collarValid: true
+      },
+      {
+        localPeerDetectionsLastEpoch: [],
+        observerScannedWithoutPeerLastEpoch: false
+      },
+      60,
+      60
+    );
+    const withMotion = applyMotionPeerAdaptivePolicy(
       animal,
       defaultAdaptivePolicy,
       {
@@ -427,30 +546,158 @@ describe("simulation engine", () => {
         motionMagnitude: 0.2,
         collarValid: true
       },
-      [
-        {
-          time: 0,
-          observerId: animal.id,
-          peerId: "animal-2",
-          trueDistance: 0.5,
-          rssi: -60,
-          scanPolicyId: "fixed-rate"
-        }
-      ],
+      {
+        localPeerDetectionsLastEpoch: [],
+        observerScannedWithoutPeerLastEpoch: false
+      },
       60,
       60
     );
 
-    expect(updated.collar.motionDrive).toBeGreaterThan(0);
-    expect(updated.collar.peerDrive).toBeGreaterThan(0);
-    expect(updated.collar.scanIntervalSeconds).toBeLessThan(defaultAdaptivePolicy.scanIntervalMaxSeconds);
+    expect(withMotion.collar.motionDrive).toBeGreaterThan(withoutMotion.collar.motionDrive);
+    expect(withMotion.collar.samplingDrive).toBeGreaterThan(withoutMotion.collar.samplingDrive);
+  });
+
+  it("increases peer drive only for the observer-local collar", () => {
+    const config = testConfig({ activePolicy: { ...defaultAdaptivePolicy }, animalCount: 2 });
+    const [observer, peer] = createInitialSimulation(config).animals;
+    const detections = [
+      {
+        time: 0,
+        observerId: observer.id,
+        peerId: peer.id,
+        trueDistance: 0.5,
+        rssi: -60,
+        scanPolicyId: "adaptive"
+      }
+    ];
+    const observerUpdated = applyMotionPeerAdaptivePolicy(
+      observer,
+      defaultAdaptivePolicy,
+      { time: 60, animalId: observer.id, motionDetected: false, motionMagnitude: 0, collarValid: true },
+      adaptivePolicyInputsForAnimal(observer.id, detections, []),
+      60,
+      60
+    );
+    const peerUpdated = applyMotionPeerAdaptivePolicy(
+      peer,
+      defaultAdaptivePolicy,
+      { time: 60, animalId: peer.id, motionDetected: false, motionMagnitude: 0, collarValid: true },
+      adaptivePolicyInputsForAnimal(peer.id, detections, []),
+      60,
+      60
+    );
+
+    expect(observerUpdated.collar.peerDrive).toBeGreaterThan(0);
+    expect(peerUpdated.collar.peerDrive).toBe(0);
+  });
+
+  it("applies peer-miss penalty only after a scan epoch with zero observer-local detections", () => {
+    const observerId = "animal-1";
+    const detections = [
+      {
+        time: 30,
+        observerId,
+        peerId: "animal-2",
+        trueDistance: 0.5,
+        rssi: -60,
+        scanPolicyId: "adaptive"
+      }
+    ];
+    const scanWindows = [
+      {
+        startTime: 0,
+        endTime: 10,
+        observerId,
+        scanPolicyId: "adaptive",
+        detectedPeerIds: [],
+        detectedAnyPeer: false
+      },
+      {
+        startTime: 10,
+        endTime: 20,
+        observerId,
+        scanPolicyId: "adaptive",
+        detectedPeerIds: ["animal-2"],
+        detectedAnyPeer: true
+      }
+    ];
+
+    expect(adaptivePolicyInputsForAnimal(observerId, [], scanWindows).observerScannedWithoutPeerLastEpoch).toBe(true);
+    expect(adaptivePolicyInputsForAnimal(observerId, detections, scanWindows).observerScannedWithoutPeerLastEpoch).toBe(false);
+    expect(adaptivePolicyInputsForAnimal(observerId, [], []).observerScannedWithoutPeerLastEpoch).toBe(false);
+  });
+
+  it("reduces peer drive faster after scanning without any peer detections", () => {
+    const config = testConfig({ activePolicy: { ...defaultAdaptivePolicy } });
+    const animal = {
+      ...createInitialSimulation(config).animals[0],
+      collar: {
+        ...createInitialSimulation(config).animals[0].collar,
+        peerDrive: 0.8
+      }
+    };
+    const observation = { time: 60, animalId: animal.id, motionDetected: false, motionMagnitude: 0, collarValid: true };
+    const decayOnly = applyMotionPeerAdaptivePolicy(
+      animal,
+      defaultAdaptivePolicy,
+      observation,
+      { localPeerDetectionsLastEpoch: [], observerScannedWithoutPeerLastEpoch: false },
+      60,
+      60
+    );
+    const scannedWithoutPeer = applyMotionPeerAdaptivePolicy(
+      animal,
+      defaultAdaptivePolicy,
+      observation,
+      { localPeerDetectionsLastEpoch: [], observerScannedWithoutPeerLastEpoch: true },
+      60,
+      60
+    );
+
+    expect(scannedWithoutPeer.collar.peerDrive).toBeLessThan(decayOnly.collar.peerDrive);
+  });
+
+  it("does not count adaptive peer state as a BLE capture hit", () => {
+    const state = createInitialSimulation(testConfig({ activePolicy: { ...defaultAdaptivePolicy }, animalCount: 2 }));
+    const metrics = computeMetrics(state, {
+      ...state.logs,
+      trueDyads: [trueDyadLog({ time: 60, animalA: "animal-1", animalB: "animal-2", distance: 0.5 })],
+      adaptiveBlePolicy: [
+        {
+          time: 60,
+          epochStartTime: 0,
+          epochEndTime: 60,
+          animalId: "animal-1",
+          motionDetected: false,
+          motionEventCount: 0,
+          localPeerDetectionCount: 1,
+          observerScannedWithoutPeer: false,
+          baselineContribution: 0.25,
+          motionContribution: 0,
+          peerContribution: 0.55,
+          motionDrive: 0,
+          peerDrive: 1,
+          samplingDrive: 0.8,
+          scanIntervalSeconds: 10,
+          scanWindowSeconds: 2,
+          advIntervalSeconds: 2,
+          advertisingBurstDurationSeconds: 2,
+          combinedEnvelopeDuty: 1.2,
+          saturatedScheduleWarning: true
+        }
+      ]
+    });
+
+    expect(metrics.bleCaptureHits).toBe(0);
+    expect(metrics.bleCaptureOpportunities).toBe(1);
   });
 
   it("changes distance-dependent contacts when physical scale changes", () => {
     const small = runSimulation(createInitialSimulation(testConfig({ seed: "scale", enclosure: { width: 6, height: 4 } })), 5);
     const large = runSimulation(createInitialSimulation(testConfig({ seed: "scale", enclosure: { width: 24, height: 14 } })), 5);
-    const smallContacts = small.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius).length;
-    const largeContacts = large.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadius).length;
+    const smallContacts = small.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadiusAny).length;
+    const largeContacts = large.logs.trueDyads.filter((dyad) => dyad.withinDetectionRadiusAny).length;
 
     expect(smallContacts).toBeGreaterThan(largeContacts);
   });
@@ -522,4 +769,72 @@ function weightedMovementCenterHour(rows: AnimalStateLog[], startTimeSeconds: nu
     movingRows += 1;
   }
   return movingRows > 0 ? weightedHours / movingRows : 0;
+}
+
+function trueDyadLog({
+  time,
+  animalA,
+  animalB,
+  distance,
+  withinDetectionRadiusAny = true
+}: {
+  time: number;
+  animalA: string;
+  animalB: string;
+  distance: number;
+  withinDetectionRadiusAny?: boolean;
+}): TrueDyadLog {
+  return {
+    time,
+    epochStartTime: time - defaultSimulationConfig.timeStepSeconds,
+    epochEndTime: time,
+    animalA,
+    animalB,
+    distance,
+    withinDetectionRadius: distance <= defaultSimulationConfig.radio.detectionRadiusMeters,
+    withinDetectionRadiusAtEnd: distance <= defaultSimulationConfig.radio.detectionRadiusMeters,
+    withinDetectionRadiusAny,
+    withinSocialRadius: distance <= defaultSimulationConfig.radio.socialRadiusMeters,
+    bothCollarsValid: true,
+    inRangeSeconds: withinDetectionRadiusAny ? defaultSimulationConfig.timeStepSeconds : 0,
+    minDistanceMeters: withinDetectionRadiusAny ? Math.min(distance, defaultSimulationConfig.radio.detectionRadiusMeters) : distance,
+    endDistanceMeters: distance
+  };
+}
+
+function animalAt(id: string, x: number, y: number): Animal {
+  return {
+    id,
+    traits: {} as Animal["traits"],
+    state: "moving",
+    position: {
+      mode: "node",
+      fromNodeId: "node-1",
+      toNodeId: "node-1",
+      progress: 0,
+      x,
+      y
+    },
+    collar: {
+      animalId: id,
+      valid: true,
+      batteryMahRemaining: defaultSimulationConfig.energy.batteryCapacityMah,
+      scanActive: false,
+      advActive: false,
+      scanIntervalSeconds: 60,
+      scanWindowSeconds: 1.5,
+      advIntervalSeconds: 60,
+      advertisingBurstDurationSeconds: 2,
+      scanPhaseOffsetSeconds: 0,
+      advPhaseOffsetSeconds: 0,
+      motionDrive: 0,
+      peerDrive: 0,
+      samplingDrive: 0,
+      lastScanTime: 0,
+      lastAdvTime: 0
+    },
+    boutRemainingSeconds: 0,
+    recentNodeIds: [],
+    behaviorSchedule: []
+  };
 }

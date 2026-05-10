@@ -28,18 +28,14 @@ type ControlsPanelProps = {
   config: SimulationConfig;
   isBuildDirty: boolean;
   buildProgress: BuildProgress;
-  isPlaying: boolean;
-  speed: number;
   showTrueProximity: boolean;
   showObservedDetections: boolean;
   onConfigChange: (config: SimulationConfig) => void;
+  onResetSettingsToDefaults: () => void;
   onBuildSimulation: () => void;
-  onPlayPause: () => void;
-  onReset: () => void;
-  onStep: () => void;
-  onSpeedChange: (speed: number) => void;
   onShowTrueProximityChange: (show: boolean) => void;
   onShowObservedDetectionsChange: (show: boolean) => void;
+  onOpenSweepReport?: () => void;
 };
 
 type BuildProgress = {
@@ -51,20 +47,17 @@ export function ControlsPanel({
   config,
   isBuildDirty,
   buildProgress,
-  isPlaying,
-  speed,
   showTrueProximity,
   showObservedDetections,
   onConfigChange,
+  onResetSettingsToDefaults,
   onBuildSimulation,
-  onPlayPause,
-  onReset,
-  onStep,
-  onSpeedChange,
   onShowTrueProximityChange,
-  onShowObservedDetectionsChange
+  onShowObservedDetectionsChange,
+  onOpenSweepReport
 }: ControlsPanelProps) {
   const [isAdvancedSpeciesOpen, setIsAdvancedSpeciesOpen] = useState(false);
+  const [unlockNeutralAnchor, setUnlockNeutralAnchor] = useState(false);
   const fixedPolicy: FixedPolicyConfig | undefined =
     config.activePolicy.type === "fixed" ? config.activePolicy : undefined;
   const adaptivePolicy: MotionPeerAdaptivePolicyConfig | undefined =
@@ -113,18 +106,45 @@ export function ControlsPanel({
       }
     });
   };
+  const updateAdaptivePolicy = (policy: MotionPeerAdaptivePolicyConfig) => {
+    onConfigChange({
+      ...config,
+      activePolicy: policy
+    });
+  };
 
   return (
-    <aside className="panel controls-panel">
+    <aside className={`panel controls-panel${isBuildDirty ? " controls-panel--stale" : ""}`}>
       <h2>Controls</h2>
       <button
         type="button"
-        className={buildProgress.isBuilding ? "build-button building" : isBuildDirty ? "build-button dirty" : "build-button"}
+        className={
+          buildProgress.isBuilding ? "build-button-primary building" : isBuildDirty ? "build-button-primary dirty" : "build-button-primary"
+        }
         disabled={!isBuildDirty || buildProgress.isBuilding}
         onClick={onBuildSimulation}
       >
         {buildProgress.isBuilding ? "Building Simulation..." : isBuildDirty ? "Build Simulation" : "Simulation Built"}
       </button>
+      <button
+        type="button"
+        className="secondary-button reset-defaults-button"
+        disabled={buildProgress.isBuilding}
+        onClick={onResetSettingsToDefaults}
+      >
+        Reset settings to defaults
+      </button>
+      <label>
+        Random seed
+        <input
+          value={config.seed}
+          aria-describedby="seed-help"
+          onChange={(event) => onConfigChange({ ...config, seed: event.target.value })}
+        />
+      </label>
+      <p id="seed-help" className="helper-text">
+        Same seed and settings recreate the same path graph, traits, movement, and detections.
+      </p>
       {buildProgress.isBuilding ? (
         <div className="build-progress" role="status" aria-live="polite">
           <div className="build-progress-label">
@@ -140,31 +160,14 @@ export function ControlsPanel({
         <p className="helper-text">Settings changed. Build the simulation to update the canvas, timeline, logs, and metrics.</p>
       ) : null}
 
+      {onOpenSweepReport ? (
+        <button type="button" className="secondary-button sweep-report-shortcut" onClick={onOpenSweepReport}>
+          Open sweep report
+        </button>
+      ) : null}
+
       <section className="control-section">
         <h3>Simulation / Biocosm</h3>
-        <div className="button-row">
-          <button type="button" onClick={onPlayPause}>
-            {isPlaying ? "Pause" : "Play"}
-          </button>
-          <button type="button" onClick={onStep}>
-            Step
-          </button>
-          <button type="button" onClick={onReset}>
-            Reset
-          </button>
-        </div>
-
-        <label>
-          Random seed
-          <input
-            value={config.seed}
-            aria-describedby="seed-help"
-            onChange={(event) => onConfigChange({ ...config, seed: event.target.value })}
-          />
-        </label>
-        <p id="seed-help" className="helper-text">
-          Same seed and settings recreate the same path graph, traits, movement, and detections.
-        </p>
 
         <label>
           Start time
@@ -265,18 +268,6 @@ export function ControlsPanel({
           />
         </label>
 
-        <label>
-          Playback speed: {speed}x
-          <input
-            type="range"
-            min="1"
-            max="20"
-            step="1"
-            value={speed}
-            onChange={(event) => onSpeedChange(Number(event.target.value))}
-          />
-        </label>
-
         <label className="checkbox-label">
           <input
             type="checkbox"
@@ -294,204 +285,6 @@ export function ControlsPanel({
           />
           Show observed BLE detections
         </label>
-      </section>
-
-      <section className="control-section">
-        <h3>Device / BLE</h3>
-        <p className="helper-text">
-          BLE capture rate uses simulated in-range dyad intervals at each frame (60s by default) compared to raw detection
-          events; firmware-shaped unique peers per minute (max RSSI) are listed separately in metrics.
-        </p>
-
-        <label>
-          Adaptive policy
-          <select
-            value={config.activePolicy.type}
-            onChange={(event) => {
-              const nextType = event.target.value;
-              onConfigChange({
-                ...config,
-                activePolicy:
-                  nextType === "motion_peer_adaptive"
-                    ? { ...defaultAdaptivePolicy }
-                    : config.activePolicy.type === "fixed"
-                      ? config.activePolicy
-                      : { ...juxtaMainCMode0FixedPolicy }
-              });
-            }}
-          >
-            <option value="fixed">Fixed-rate BLE</option>
-            <option value="motion_peer_adaptive">Motion + peer adaptive BLE</option>
-          </select>
-        </label>
-
-        <label>
-          Detection radius: {config.radio.detectionRadiusMeters.toFixed(2)} m
-          <input
-            type="range"
-            min="0.05"
-            max="3"
-            step="0.05"
-            value={config.radio.detectionRadiusMeters}
-            onChange={(event) =>
-              onConfigChange({
-                ...config,
-                radio: { ...config.radio, detectionRadiusMeters: Number(event.target.value) }
-              })
-            }
-          />
-        </label>
-
-        <label>
-          Social radius: {config.radio.socialRadiusMeters.toFixed(2)} m
-          <input
-            type="range"
-            min="0.05"
-            max="2"
-            step="0.05"
-            value={config.radio.socialRadiusMeters}
-            onChange={(event) =>
-              onConfigChange({
-                ...config,
-                radio: { ...config.radio, socialRadiusMeters: Number(event.target.value) }
-              })
-            }
-          />
-        </label>
-        <p className="helper-text">
-          Social radius is a ground-truth analysis threshold. Social propensity below is the animal behavior bias.
-        </p>
-
-        {fixedPolicy ? (
-        <>
-          <label>
-            Scan interval: {fixedPolicy.scanIntervalSeconds}s
-            <input
-              type="range"
-              min="5"
-              max="60"
-              step="5"
-              value={fixedPolicy.scanIntervalSeconds}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, scanIntervalSeconds: Number(event.target.value) }
-                })
-              }
-            />
-          </label>
-
-          <label>
-            Scan burst duration: {fixedPolicy.scanWindowSeconds.toFixed(1)}s
-            <input
-              type="range"
-              min="0.5"
-              max="5"
-              step="0.5"
-              value={fixedPolicy.scanWindowSeconds}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, scanWindowSeconds: Number(event.target.value) }
-                })
-              }
-            />
-          </label>
-
-          <label>
-            Advertise interval: {fixedPolicy.advIntervalSeconds}s
-            <input
-              type="range"
-              min="5"
-              max="50"
-              step="5"
-              value={fixedPolicy.advIntervalSeconds}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, advIntervalSeconds: Number(event.target.value) }
-                })
-              }
-            />
-          </label>
-
-          <label>
-            Advertise burst duration: {(fixedPolicy.advertisingBurstDurationSeconds ?? 2).toFixed(1)}s
-            <input
-              type="range"
-              min="0.5"
-              max="5"
-              step="0.5"
-              value={fixedPolicy.advertisingBurstDurationSeconds ?? 2}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: {
-                    ...fixedPolicy,
-                    advertisingBurstDurationSeconds: Number(event.target.value)
-                  }
-                })
-              }
-            />
-          </label>
-        </>
-        ) : adaptivePolicy ? (
-        <details className="advanced-controls">
-          <summary>Adaptive details</summary>
-          <label>
-            Motion sensitivity: {config.motionSensor.thresholdMetersPerStep.toFixed(2)} m/step
-            <input
-              type="range"
-              min="0.01"
-              max="0.3"
-              step="0.01"
-              value={config.motionSensor.thresholdMetersPerStep}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  motionSensor: { ...config.motionSensor, thresholdMetersPerStep: Number(event.target.value) }
-                })
-              }
-            />
-          </label>
-          <label>
-            Peer boost: {adaptivePolicy.peerGain.toFixed(2)}
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={adaptivePolicy.peerGain}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...adaptivePolicy, peerGain: Number(event.target.value) }
-                })
-              }
-            />
-          </label>
-          <label>
-            Decay time: {Math.round(adaptivePolicy.tauMotionSeconds / 60)} min
-            <input
-              type="range"
-              min="1"
-              max="60"
-              step="1"
-              value={Math.round(adaptivePolicy.tauMotionSeconds / 60)}
-              onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: {
-                    ...adaptivePolicy,
-                    tauMotionSeconds: Number(event.target.value) * 60,
-                    tauPeerSeconds: Number(event.target.value) * 180
-                  }
-                })
-              }
-            />
-          </label>
-        </details>
-        ) : null}
       </section>
 
       <section className="control-section">
@@ -650,6 +443,385 @@ export function ControlsPanel({
               </div>
             </div>
           </div>
+        ) : null}
+      </section>
+
+      <section className="control-section">
+        <h3>Device / BLE</h3>
+        <p className="helper-text">
+          BLE capture rate uses simulated in-range dyad intervals at each frame (60s by default) compared to raw detection
+          events; firmware-shaped unique peers per minute (max RSSI) are listed separately in metrics.
+        </p>
+
+        <label>
+          Adaptive policy
+          <select
+            value={config.activePolicy.type}
+            onChange={(event) => {
+              const nextType = event.target.value;
+              onConfigChange({
+                ...config,
+                activePolicy:
+                  nextType === "motion_peer_adaptive"
+                    ? { ...defaultAdaptivePolicy }
+                    : config.activePolicy.type === "fixed"
+                      ? config.activePolicy
+                      : { ...juxtaMainCMode0FixedPolicy }
+              });
+            }}
+          >
+            <option value="fixed">Fixed-rate BLE</option>
+            <option value="motion_peer_adaptive">Motion + peer adaptive BLE</option>
+          </select>
+        </label>
+
+        <label>
+          Detection radius: {config.radio.detectionRadiusMeters.toFixed(2)} m
+          <input
+            type="range"
+            min="0.01"
+            max="2"
+            step="0.01"
+            value={config.radio.detectionRadiusMeters}
+            onChange={(event) =>
+              onConfigChange({
+                ...config,
+                radio: { ...config.radio, detectionRadiusMeters: Number(event.target.value) }
+              })
+            }
+          />
+        </label>
+
+        <label>
+          Opportunity sample step: {config.radio.opportunitySampleStepSeconds.toFixed(1)}s
+          <input
+            type="range"
+            min="0.5"
+            max="10"
+            step="0.5"
+            value={config.radio.opportunitySampleStepSeconds}
+            onChange={(event) =>
+              onConfigChange({
+                ...config,
+                radio: { ...config.radio, opportunitySampleStepSeconds: Number(event.target.value) }
+              })
+            }
+          />
+        </label>
+        <p className="helper-text">
+          Capture opportunities sample within each simulation epoch so briefly in-range dyads are not missed.
+        </p>
+
+        <label>
+          Social radius: {config.radio.socialRadiusMeters.toFixed(2)} m
+          <input
+            type="range"
+            min="0.05"
+            max="2"
+            step="0.05"
+            value={config.radio.socialRadiusMeters}
+            onChange={(event) =>
+              onConfigChange({
+                ...config,
+                radio: { ...config.radio, socialRadiusMeters: Number(event.target.value) }
+              })
+            }
+          />
+        </label>
+        <p className="helper-text">
+          Social radius is a ground-truth analysis threshold. Social propensity below is the animal behavior bias.
+        </p>
+
+        {fixedPolicy ? (
+        <>
+          <label>
+            Scan interval: {fixedPolicy.scanIntervalSeconds}s
+            <input
+              type="range"
+              min="5"
+              max="60"
+              step="5"
+              value={fixedPolicy.scanIntervalSeconds}
+              onChange={(event) =>
+                onConfigChange({
+                  ...config,
+                  activePolicy: { ...fixedPolicy, scanIntervalSeconds: Number(event.target.value) }
+                })
+              }
+            />
+          </label>
+
+          <label>
+            Scan burst duration: {fixedPolicy.scanWindowSeconds.toFixed(1)}s
+            <input
+              type="range"
+              min="0.5"
+              max="5"
+              step="0.5"
+              value={fixedPolicy.scanWindowSeconds}
+              onChange={(event) =>
+                onConfigChange({
+                  ...config,
+                  activePolicy: { ...fixedPolicy, scanWindowSeconds: Number(event.target.value) }
+                })
+              }
+            />
+          </label>
+
+          <label>
+            Advertise interval: {fixedPolicy.advIntervalSeconds}s
+            <input
+              type="range"
+              min="5"
+              max="50"
+              step="5"
+              value={fixedPolicy.advIntervalSeconds}
+              onChange={(event) =>
+                onConfigChange({
+                  ...config,
+                  activePolicy: { ...fixedPolicy, advIntervalSeconds: Number(event.target.value) }
+                })
+              }
+            />
+          </label>
+
+          <label>
+            Advertise burst duration: {(fixedPolicy.advertisingBurstDurationSeconds ?? 2).toFixed(1)}s
+            <input
+              type="range"
+              min="0.5"
+              max="5"
+              step="0.5"
+              value={fixedPolicy.advertisingBurstDurationSeconds ?? 2}
+              onChange={(event) =>
+                onConfigChange({
+                  ...config,
+                  activePolicy: {
+                    ...fixedPolicy,
+                    advertisingBurstDurationSeconds: Number(event.target.value)
+                  }
+                })
+              }
+            />
+          </label>
+        </>
+        ) : adaptivePolicy ? (
+        <>
+          <label>
+            Adaptive range
+            <select
+              value={adaptiveRangePresetId(adaptivePolicy)}
+              onChange={(event) => updateAdaptivePolicy(applyAdaptiveRangePreset(adaptivePolicy, event.target.value))}
+            >
+              <option value="conservative">Conservative</option>
+              <option value="balanced">Balanced</option>
+              <option value="aggressive">Aggressive</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+
+          <label>
+            Adaptive baseline
+            <select
+              value={adaptiveBaselinePresetId(adaptivePolicy)}
+              onChange={(event) => updateAdaptivePolicy(applyAdaptiveBaselinePreset(adaptivePolicy, event.target.value))}
+            >
+              <option value="energySaving">Energy saving</option>
+              <option value="balanced">Balanced</option>
+              <option value="upscaleOnly">Upscale only</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+
+          <label>
+            Motion influence
+            <select
+              value={motionInfluencePresetId(adaptivePolicy)}
+              onChange={(event) => updateAdaptivePolicy(applyMotionInfluencePreset(adaptivePolicy, event.target.value))}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+
+          <label>
+            Peer influence
+            <select
+              value={peerInfluencePresetId(adaptivePolicy)}
+              onChange={(event) => updateAdaptivePolicy(applyPeerInfluencePreset(adaptivePolicy, event.target.value))}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="custom">Custom</option>
+            </select>
+          </label>
+
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={adaptivePolicy.allowEnergySavingDownscale}
+              onChange={(event) =>
+                updateAdaptivePolicy({ ...adaptivePolicy, allowEnergySavingDownscale: event.target.checked })
+              }
+            />
+            Allow energy-saving downscale
+          </label>
+          <p className="helper-text">
+            When disabled, adaptive mode only upscales above the fixed-rate neutral schedule.
+          </p>
+
+          <details className="advanced-controls">
+            <summary>Adaptive details</summary>
+            <label>
+              Motion sensitivity: {config.motionSensor.thresholdMetersPerStep.toFixed(2)} m/step
+              <input
+                type="range"
+                min="0.01"
+                max="0.3"
+                step="0.01"
+                value={config.motionSensor.thresholdMetersPerStep}
+                onChange={(event) =>
+                  onConfigChange({
+                    ...config,
+                    motionSensor: { ...config.motionSensor, thresholdMetersPerStep: Number(event.target.value) }
+                  })
+                }
+              />
+            </label>
+            <label>
+              Baseline sampling drive: {adaptivePolicy.baselineDrive.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="0.5"
+                step="0.01"
+                value={adaptivePolicy.baselineDrive}
+                onChange={(event) => updateAdaptivePolicy({ ...adaptivePolicy, baselineDrive: Number(event.target.value) })}
+              />
+            </label>
+            <p className="helper-text">
+              Baseline sampling drive is the default BLE sampling intensity when no recent motion or peer detections are present.
+            </p>
+            <label>
+              Motion gain: {adaptivePolicy.motionGain.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={adaptivePolicy.motionGain}
+                onChange={(event) => updateAdaptivePolicy({ ...adaptivePolicy, motionGain: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Motion decay: {Math.round(adaptivePolicy.tauMotionSeconds / 60)} min
+              <input
+                type="range"
+                min="1"
+                max="60"
+                step="1"
+                value={Math.round(adaptivePolicy.tauMotionSeconds / 60)}
+                onChange={(event) =>
+                  updateAdaptivePolicy({ ...adaptivePolicy, tauMotionSeconds: Number(event.target.value) * 60 })
+                }
+              />
+            </label>
+            <label>
+              Motion weight: {adaptivePolicy.motionWeight.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={adaptivePolicy.motionWeight}
+                onChange={(event) => updateAdaptivePolicy({ ...adaptivePolicy, motionWeight: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Peer gain: {adaptivePolicy.peerGain.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={adaptivePolicy.peerGain}
+                onChange={(event) => updateAdaptivePolicy({ ...adaptivePolicy, peerGain: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Peer decay: {Math.round(adaptivePolicy.tauPeerSeconds / 60)} min
+              <input
+                type="range"
+                min="1"
+                max="60"
+                step="1"
+                value={Math.round(adaptivePolicy.tauPeerSeconds / 60)}
+                onChange={(event) =>
+                  updateAdaptivePolicy({ ...adaptivePolicy, tauPeerSeconds: Number(event.target.value) * 60 })
+                }
+              />
+            </label>
+            <label>
+              Peer weight: {adaptivePolicy.peerWeight.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={adaptivePolicy.peerWeight}
+                onChange={(event) => updateAdaptivePolicy({ ...adaptivePolicy, peerWeight: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              Scan-without-peer penalty: {adaptivePolicy.peerMissPenalty.toFixed(2)}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={adaptivePolicy.peerMissPenalty}
+                onChange={(event) =>
+                  updateAdaptivePolicy({ ...adaptivePolicy, peerMissPenalty: Number(event.target.value) })
+                }
+              />
+            </label>
+            <TimingAnchorControls
+              title="Low-intensity anchor"
+              anchor="lowIntensity"
+              policy={adaptivePolicy}
+              onChange={updateAdaptivePolicy}
+            />
+            <TimingAnchorControls
+              title="High-intensity anchor"
+              anchor="highIntensity"
+              policy={adaptivePolicy}
+              onChange={updateAdaptivePolicy}
+            />
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={unlockNeutralAnchor}
+                onChange={(event) => setUnlockNeutralAnchor(event.target.checked)}
+              />
+              Unlock neutral anchor
+            </label>
+            {unlockNeutralAnchor ? (
+              <TimingAnchorControls
+                title="Fixed-rate neutral anchor"
+                anchor="neutral"
+                policy={adaptivePolicy}
+                onChange={updateAdaptivePolicy}
+              />
+            ) : (
+              <p className="helper-text">
+                Neutral stays locked to the fixed-rate baseline: 20s scan, 1.5s window, 5s advertise.
+              </p>
+            )}
+          </details>
+        </>
         ) : null}
       </section>
 
@@ -823,6 +995,184 @@ function formatDistribution(distribution: TraitDistribution): string {
 function formatHour(hour: number): string {
   return `${Math.floor(hour).toString().padStart(2, "0")}:00`;
 }
+
+type AdaptiveAnchorKey = "lowIntensity" | "neutral" | "highIntensity";
+type AdaptiveTimingField = keyof MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"];
+
+function TimingAnchorControls({
+  title,
+  anchor,
+  policy,
+  onChange
+}: {
+  title: string;
+  anchor: AdaptiveAnchorKey;
+  policy: MotionPeerAdaptivePolicyConfig;
+  onChange: (policy: MotionPeerAdaptivePolicyConfig) => void;
+}) {
+  const timing = policy.timingAnchors[anchor];
+  const updateTiming = (field: AdaptiveTimingField, value: number) => {
+    onChange({
+      ...policy,
+      timingAnchors: {
+        ...policy.timingAnchors,
+        [anchor]: {
+          ...timing,
+          [field]: value
+        }
+      }
+    });
+  };
+
+  return (
+    <div className="adaptive-anchor-control">
+      <span>{title}</span>
+      <div className="adaptive-anchor-grid">
+        <label>
+          Scan interval
+          <input
+            type="number"
+            min="1"
+            step="0.5"
+            value={timing.scanIntervalSeconds}
+            onChange={(event) => updateTiming("scanIntervalSeconds", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Scan window
+          <input
+            type="number"
+            min="0.05"
+            step="0.05"
+            value={timing.scanWindowSeconds}
+            onChange={(event) => updateTiming("scanWindowSeconds", Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Adv interval
+          <input
+            type="number"
+            min="0.25"
+            step="0.25"
+            value={timing.advIntervalSeconds}
+            onChange={(event) => updateTiming("advIntervalSeconds", Number(event.target.value))}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function adaptiveRangePresetId(policy: MotionPeerAdaptivePolicyConfig): string {
+  const match = Object.entries(adaptiveRangePresets).find(([, preset]) =>
+    timingMatches(policy.timingAnchors.lowIntensity, preset.lowIntensity) &&
+    timingMatches(policy.timingAnchors.highIntensity, preset.highIntensity)
+  );
+  return match?.[0] ?? "custom";
+}
+
+function applyAdaptiveRangePreset(policy: MotionPeerAdaptivePolicyConfig, presetId: string): MotionPeerAdaptivePolicyConfig {
+  const preset = adaptiveRangePresets[presetId as keyof typeof adaptiveRangePresets];
+  if (!preset) {
+    return policy;
+  }
+  return {
+    ...policy,
+    timingAnchors: {
+      ...policy.timingAnchors,
+      lowIntensity: preset.lowIntensity,
+      highIntensity: preset.highIntensity
+    }
+  };
+}
+
+function adaptiveBaselinePresetId(policy: MotionPeerAdaptivePolicyConfig): string {
+  const match = Object.entries(adaptiveBaselinePresets).find(([, preset]) =>
+    nearlyEqual(policy.baselineDrive, preset.baselineDrive) &&
+    policy.allowEnergySavingDownscale === preset.allowEnergySavingDownscale
+  );
+  return match?.[0] ?? "custom";
+}
+
+function applyAdaptiveBaselinePreset(policy: MotionPeerAdaptivePolicyConfig, presetId: string): MotionPeerAdaptivePolicyConfig {
+  const preset = adaptiveBaselinePresets[presetId as keyof typeof adaptiveBaselinePresets];
+  return preset ? { ...policy, ...preset } : policy;
+}
+
+function motionInfluencePresetId(policy: MotionPeerAdaptivePolicyConfig): string {
+  const match = Object.entries(motionInfluencePresets).find(([, preset]) =>
+    nearlyEqual(policy.motionGain, preset.motionGain) &&
+    nearlyEqual(policy.motionWeight, preset.motionWeight) &&
+    policy.tauMotionSeconds === preset.tauMotionSeconds
+  );
+  return match?.[0] ?? "custom";
+}
+
+function applyMotionInfluencePreset(policy: MotionPeerAdaptivePolicyConfig, presetId: string): MotionPeerAdaptivePolicyConfig {
+  const preset = motionInfluencePresets[presetId as keyof typeof motionInfluencePresets];
+  return preset ? { ...policy, ...preset } : policy;
+}
+
+function peerInfluencePresetId(policy: MotionPeerAdaptivePolicyConfig): string {
+  const match = Object.entries(peerInfluencePresets).find(([, preset]) =>
+    nearlyEqual(policy.peerGain, preset.peerGain) &&
+    nearlyEqual(policy.peerWeight, preset.peerWeight) &&
+    nearlyEqual(policy.peerMissPenalty, preset.peerMissPenalty) &&
+    policy.tauPeerSeconds === preset.tauPeerSeconds
+  );
+  return match?.[0] ?? "custom";
+}
+
+function applyPeerInfluencePreset(policy: MotionPeerAdaptivePolicyConfig, presetId: string): MotionPeerAdaptivePolicyConfig {
+  const preset = peerInfluencePresets[presetId as keyof typeof peerInfluencePresets];
+  return preset ? { ...policy, ...preset } : policy;
+}
+
+function timingMatches(
+  a: MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"],
+  b: MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"]
+): boolean {
+  return nearlyEqual(a.scanIntervalSeconds, b.scanIntervalSeconds) &&
+    nearlyEqual(a.scanWindowSeconds, b.scanWindowSeconds) &&
+    nearlyEqual(a.advIntervalSeconds, b.advIntervalSeconds);
+}
+
+function nearlyEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) < 1e-9;
+}
+
+const adaptiveRangePresets = {
+  conservative: {
+    lowIntensity: { scanIntervalSeconds: 40, scanWindowSeconds: 1, advIntervalSeconds: 10 },
+    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 2, advIntervalSeconds: 2 }
+  },
+  balanced: {
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 0.5, advIntervalSeconds: 20 },
+    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: 3, advIntervalSeconds: 1 }
+  },
+  aggressive: {
+    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: 0.25, advIntervalSeconds: 30 },
+    highIntensity: { scanIntervalSeconds: 2, scanWindowSeconds: 4, advIntervalSeconds: 0.5 }
+  }
+} as const;
+
+const adaptiveBaselinePresets = {
+  energySaving: { baselineDrive: 0.2, allowEnergySavingDownscale: true },
+  balanced: { baselineDrive: 0.4, allowEnergySavingDownscale: true },
+  upscaleOnly: { baselineDrive: 0.5, allowEnergySavingDownscale: false }
+} as const;
+
+const motionInfluencePresets = {
+  low: { motionGain: 0.2, motionWeight: 0.3, tauMotionSeconds: 120 },
+  medium: { motionGain: 0.35, motionWeight: 0.45, tauMotionSeconds: 180 },
+  high: { motionGain: 0.55, motionWeight: 0.65, tauMotionSeconds: 300 }
+} as const;
+
+const peerInfluencePresets = {
+  low: { peerGain: 0.25, peerWeight: 0.35, tauPeerSeconds: 600, peerMissPenalty: 0.1 },
+  medium: { peerGain: 0.45, peerWeight: 0.55, tauPeerSeconds: 900, peerMissPenalty: 0.2 },
+  high: { peerGain: 0.65, peerWeight: 0.75, tauPeerSeconds: 1800, peerMissPenalty: 0.3 }
+} as const;
 
 const sizeOptions = Array.from({ length: 10 }, (_, index) => (index + 1) * 10);
 const hourOptions = Array.from({ length: 24 }, (_, hour) => hour);

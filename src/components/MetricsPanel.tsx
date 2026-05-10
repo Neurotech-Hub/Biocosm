@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { SimulationMetrics } from "../simulation/types";
+import { InfoPopover } from "./InfoPopover";
 
 type MetricsPanelProps = {
   metrics: SimulationMetrics;
@@ -11,48 +12,63 @@ export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
 
   return (
     <section className="panel metrics-panel">
-      <h2>Whole-Simulation Policy Metrics</h2>
+      <div className="panel-title-row">
+        <h2>Whole-Simulation Policy Metrics</h2>
+        <InfoPopover label="Explain whole-simulation metrics" title="Metric definitions">
+          <dl className="metric-definition-list">
+            <dt>BLE capture rate</dt>
+            <dd>
+              Fraction of in-range valid dyad epochs where the simulated BLE system recorded at least one detection for
+              that unordered pair during the same epoch.
+            </dd>
+            <dt>Raw detection density</dt>
+            <dd>Total detection events divided by in-range opportunity epochs. It can exceed 1 when multiple directed detections happen in one epoch.</dd>
+            <dt>True contact steps</dt>
+            <dd>Ground-truth dyad epochs inside the social-radius threshold with both collars valid.</dd>
+            <dt>Scan windows</dt>
+            <dd>Firmware-style scan windows scheduled across the whole run. Negative windows are scans that found no peer.</dd>
+            <dt>Energy and battery</dt>
+            <dd>Representative-collar estimates, not fleet totals. Capture/mAh is BLE capture hits per mAh used.</dd>
+          </dl>
+        </InfoPopover>
+      </div>
+      <div className="metric-hero-grid">
+        <Metric
+          label="BLE capture rate"
+          value={`${Math.round(metrics.bleCaptureRate * 100)}%`}
+          emphasized
+          hero
+        />
+        <Metric
+          label="BLE efficiency (hits / mAh)"
+          value={metrics.capturePerMah.toFixed(1)}
+          emphasized
+          hero
+        />
+      </div>
       <div className="metric-sections">
         <MetricSection title="BLE Capture & Recall">
-          <Metric
-            label="BLE capture rate (interval-level)"
-            value={`${Math.round(metrics.bleCaptureRate * 100)}%`}
-            emphasized
-          />
           <Metric
             label="Captured in-range intervals / opportunities"
             value={`${metrics.bleCaptureHits} / ${metrics.bleCaptureOpportunities}`}
           />
-          <Metric label="Detections / opportunity" value={metrics.recallEstimate.toFixed(2)} />
+          <Metric label="Raw detection density" value={metrics.rawDetectionDensity.toFixed(2)} />
           <Metric label="True contact steps" value={metrics.trueContactSteps.toString()} />
           <Metric label="Observed detections" value={metrics.observedDetections.toString()} />
           <Metric label="Unique observed dyads" value={metrics.uniqueObservedDyads.toString()} />
-        </MetricSection>
-
-        <MetricSection title="Firmware-Minute Rollups">
-          <Metric label="Peer entries (total)" value={metrics.firmwareMinuteObserverSlots.toString()} />
-          <Metric label="Observer rows" value={metrics.firmwareMinuteRecords.length.toString()} />
         </MetricSection>
 
         <MetricSection title="Scanning & Radio">
           <Metric label="Scan windows" value={metrics.scanWindows.toString()} />
           <Metric label="Negative scan windows" value={metrics.negativeScanWindows.toString()} />
           <Metric label="Scan windows / animal" value={scanEffort.toFixed(1)} />
-          <Metric label="Animals with scan bursts" value={metrics.scanningAnimals.toString()} />
-          <Metric label="Animals with ad bursts" value={metrics.advertisingAnimals.toString()} />
-          <Metric label="Mean sampling drive" value={metrics.meanSamplingDrive.toFixed(2)} />
-          <Metric label="Mean scan interval" value={`${Math.round(metrics.meanScanIntervalSeconds)}s`} />
         </MetricSection>
 
         <MetricSection title="Energy (Representative Collar)">
-          <Metric
-            label="Mean current draw"
-            value={`${metrics.meanEnergyCurrentMicroAmpsPerCollar.toFixed(0)} µA`}
-          />
           <Metric label="Energy used" value={`${metrics.energyUsedMah.toFixed(3)} mAh`} />
           <Metric label="Battery remaining" value={`${Math.round(metrics.batteryRemainingPercent * 100)}%`} />
           <Metric label="Estimated voltage" value={`${metrics.estimatedVoltage.toFixed(2)} V`} />
-          <Metric label="Capture / mAh" value={metrics.capturePerMah.toFixed(1)} />
+          <Metric label="Mean current draw" value={`${metrics.meanEnergyCurrentMicroAmpsPerCollar.toFixed(0)} µA`} />
         </MetricSection>
       </div>
       {metrics.energyModelWarning ? <p className="helper-text">{metrics.energyModelWarning}</p> : null}
@@ -61,8 +77,8 @@ export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
         list), not a fleet total — match these to per-device figures on the datasheet.
       </p>
       <p className="helper-text">
-        Firmware-minute metrics collapse detections like a collar minute record: unique peers per observer per clock
-        minute, keeping the strongest RSSI. Raw detection count and interval capture rate are separate measures.
+        Raw detection density and interval capture rate are separate measures: capture is bounded by opportunity epochs;
+        raw density counts detection events.
       </p>
     </section>
   );
@@ -77,9 +93,26 @@ function MetricSection({ title, children }: { title: string; children: ReactNode
   );
 }
 
-function Metric({ label, value, emphasized = false }: { label: string; value: string; emphasized?: boolean }) {
+function Metric({
+  label,
+  value,
+  emphasized = false,
+  hero = false
+}: {
+  label: string;
+  value: string;
+  emphasized?: boolean;
+  hero?: boolean;
+}) {
+  const className = [
+    "metric-card",
+    emphasized ? "metric-card-primary" : "",
+    hero ? "metric-card-hero" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={emphasized ? "metric-card metric-card-primary" : "metric-card"}>
+    <div className={className}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
