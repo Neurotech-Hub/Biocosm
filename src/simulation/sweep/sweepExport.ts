@@ -2,11 +2,7 @@ import type { SimulationConfig } from "../types";
 import type { CandidatePick, SweepPolicyParams } from "./sweepCandidates";
 import type { SweepRawRow, SweepResultBundle } from "./adaptiveBleSweep";
 import type { SweepPolicySummary } from "./sweepCandidates";
-import {
-  ADAPTIVE_SWEEP_TIMING_ANCHORS,
-  SWEEP_HELD_ADAPTIVE,
-  SWEEP_REPORT_SEEDS
-} from "./adaptiveBleSweep";
+import { ADAPTIVE_SWEEP_TIMING_ANCHORS, SWEEP_HELD_ADAPTIVE } from "./adaptiveBleSweep";
 
 function csvEscape(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) {
@@ -217,7 +213,13 @@ export function buildSweepMarkdownReport(options: {
   lines.push(`- Enclosure: ${baseConfig.enclosure.width}×${baseConfig.enclosure.height} m`);
   lines.push(`- Detection radius: ${baseConfig.radio.detectionRadiusMeters} m`);
   lines.push(`- Seeds: ${bundle.seedsUsed.join(", ")}`);
-  lines.push(`- Mode: ${bundle.mode === "fast" ? "Fast preview (current seed)" : `Report (${SWEEP_REPORT_SEEDS.join(", ")})`}`);
+  lines.push(
+    `- Mode: ${
+      bundle.mode === "fast"
+        ? "Fast preview (current seed)"
+        : `Report — aggregated across seeds: ${bundle.seedsUsed.join(", ")}`
+    }`
+  );
   lines.push("");
   lines.push("### Fixed baseline (sweep reference)");
   lines.push(`- Scan ${juxtaTimingSnippet()}`);

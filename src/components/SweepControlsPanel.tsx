@@ -1,11 +1,16 @@
 import { useMemo } from "react";
 import { InfoPopover } from "./InfoPopover";
 import {
+  ADAPTIVE_SWEEP_TIMING_ANCHORS,
   adaptiveSweepPolicyCount,
   fixedSweepPolicyCount,
   isFullSweepGrid,
   policiesPerSweepSeed,
-  sweepTrialCount
+  sweepExecutionSummary,
+  sweepTrialCount,
+  SWEEP_HELD_ADAPTIVE,
+  SWEEP_REPORT_SEED_POOL,
+  type SweepGridVariant
 } from "../simulation/sweep/adaptiveBleSweep";
 import { buildSweepSimulationBrief } from "../simulation/sweep/sweepSimulationBrief";
 import type { SimulationConfig } from "../simulation/types";
@@ -15,6 +20,10 @@ type SweepControlsPanelProps = {
   isSimulationStale: boolean;
   sweepMode: "fast" | "report";
   onSweepModeChange: (mode: "fast" | "report") => void;
+  sweepGridVariant: SweepGridVariant;
+  onSweepGridVariantChange: (variant: SweepGridVariant) => void;
+  reportSeedCount: number;
+  onReportSeedCountChange: (count: number) => void;
   isSweepRunning: boolean;
   sweepProgress: { completed: number; total: number };
   sweepError: string | null;
@@ -22,11 +31,19 @@ type SweepControlsPanelProps = {
   onCancelSweep: () => void;
 };
 
+function formatNumList(values: readonly number[]): string {
+  return values.join(", ");
+}
+
 export function SweepControlsPanel({
   builtSimulation,
   isSimulationStale,
   sweepMode,
   onSweepModeChange,
+  sweepGridVariant,
+  onSweepGridVariantChange,
+  reportSeedCount,
+  onReportSeedCountChange,
   isSweepRunning,
   sweepProgress,
   sweepError,
@@ -37,38 +54,52 @@ export function SweepControlsPanel({
     sweepProgress.total > 0 ? Math.round((100 * sweepProgress.completed) / sweepProgress.total) : 0;
 
   const simulationBrief = useMemo(
-    () => buildSweepSimulationBrief(builtSimulation, sweepMode),
-    [builtSimulation, sweepMode]
+    () =>
+      buildSweepSimulationBrief(builtSimulation, sweepMode, {
+        reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined
+      }),
+    [builtSimulation, sweepMode, reportSeedCount]
   );
+
+  const execSummary = useMemo(
+    () =>
+      sweepExecutionSummary({
+        gridVariant: sweepGridVariant,
+        mode: sweepMode,
+        builtSeed: String(builtSimulation.seed),
+        reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined
+      }),
+    [builtSimulation.seed, sweepGridVariant, sweepMode, reportSeedCount]
+  );
+
+  const buildPrefersFull = isFullSweepGrid();
+  const trialTotal = sweepTrialCount(sweepMode, {
+    gridVariant: sweepGridVariant,
+    reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined
+  });
 
   return (
     <aside className="panel sweep-controls-panel">
       <div className="panel-title-row">
         <h2>Sweep settings</h2>
         <InfoPopover label="Sweep details and grid size" title="About this sweep">
-          {isFullSweepGrid() ? (
-            <p>
-              Full grids — per seed: <strong>{fixedSweepPolicyCount()}</strong> fixed-rate schedules (scan interval × scan
-              window × <strong>advertise interval</strong>, 2 s burst; includes Juxta 5.6) +{" "}
-              <strong>{adaptiveSweepPolicyCount()}</strong> adaptive policies (
-              <strong>{policiesPerSweepSeed()}</strong> total).
-            </p>
-          ) : (
-            <p>
-              Quick grids — per seed: <strong>{fixedSweepPolicyCount()}</strong> fixed (same axes; Juxta 5.6 included) +{" "}
-              <strong>{adaptiveSweepPolicyCount()}</strong> adaptive (
-              <strong>{policiesPerSweepSeed()}</strong> total). For larger grids, production build with{" "}
-              <code>VITE_SWEEP_FULL_GRID=true</code>.
-            </p>
-          )}
+          <p>
+            <strong>Quick grid</strong> is tuned for interactive iteration. <strong>Full grid</strong> matches a production
+            build with <code>VITE_SWEEP_FULL_GRID=true</code> (larger Cartesian grids).
+          </p>
+          <p>
+            Per seed: <strong>{fixedSweepPolicyCount(sweepGridVariant)}</strong> fixed-rate schedules +{" "}
+            <strong>{adaptiveSweepPolicyCount(sweepGridVariant)}</strong> adaptive policies (
+            <strong>{policiesPerSweepSeed(sweepGridVariant)}</strong> total per seed).
+          </p>
           <p>Uses your last built simulation configuration.</p>
           <p>
-            Quick adaptive grid: <code>baselineDrive</code> values are below the 0.5 neutral anchor on purpose (energy-saving
+            Quick adaptive grid: <code>baselineDrive</code> values sit below the 0.5 neutral anchor on purpose (energy-saving
             idle state; motion/peer can ramp duty when active).
           </p>
           <p>
-            Fast preview runs {sweepTrialCount("fast")} simulations total; report mode runs {sweepTrialCount("report")}{" "}
-            (seeds 101, 202, 303), then aggregates means.
+            Report mode draws world seeds from a fixed pool ({SWEEP_REPORT_SEED_POOL.join(", ")}). Choose how many seeds to
+            include (1–5); means are aggregated across those runs.
           </p>
         </InfoPopover>
       </div>
@@ -92,6 +123,33 @@ export function SweepControlsPanel({
       </section>
 
       <fieldset className="sweep-radio-group">
+        <legend>Policy grid</legend>
+        <label className="sweep-radio-label">
+          <input
+            type="radio"
+            name="sweep-grid"
+            checked={sweepGridVariant === "quick"}
+            disabled={isSweepRunning}
+            onChange={() => onSweepGridVariantChange("quick")}
+          />
+          <span>Quick grid — faster iteration (default in dev)</span>
+        </label>
+        <label className="sweep-radio-label">
+          <input
+            type="radio"
+            name="sweep-grid"
+            checked={sweepGridVariant === "full"}
+            disabled={isSweepRunning}
+            onChange={() => onSweepGridVariantChange("full")}
+          />
+          <span>Full grid — larger scan/adaptive Cartesian grid</span>
+        </label>
+        {buildPrefersFull ? (
+          <p className="helper-text">This build defaults to full grid via <code>VITE_SWEEP_FULL_GRID</code>.</p>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="sweep-radio-group">
         <legend>Sweep mode</legend>
         <label className="sweep-radio-label">
           <input
@@ -111,9 +169,104 @@ export function SweepControlsPanel({
             disabled={isSweepRunning}
             onChange={() => onSweepModeChange("report")}
           />
-          <span>Report mode — aggregate means across seeds 101, 202, and 303</span>
+          <span>Report mode — aggregate means across multiple world seeds from the pool below</span>
         </label>
       </fieldset>
+
+      {sweepMode === "report" ? (
+        <div className="sweep-report-seeds-control">
+          <label className="sweep-report-seeds-label">
+            <span>Report seeds (from pool)</span>
+            <select
+              aria-label="Number of report seeds"
+              disabled={isSweepRunning}
+              value={reportSeedCount}
+              onChange={(e) => onReportSeedCountChange(Number(e.target.value))}
+            >
+              {[1, 2, 3, 4, 5].map((n) => (
+                <option key={n} value={n}>
+                  {n} — {SWEEP_REPORT_SEED_POOL.slice(0, n).join(", ")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="helper-text">
+            Pool order: {SWEEP_REPORT_SEED_POOL.join(", ")}. Increasing seeds adds variance averaging at higher runtime.
+          </p>
+        </div>
+      ) : null}
+
+      <details className="sweep-grid-details">
+        <summary>What this sweep exercises</summary>
+        <dl className="sweep-grid-details-list">
+          <div className="sweep-grid-details-row">
+            <dt>Grid variant</dt>
+            <dd>{execSummary.variant === "quick" ? "Quick" : "Full"}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Policies per seed</dt>
+            <dd>{execSummary.policiesPerSeed}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Simulation seeds</dt>
+            <dd>{execSummary.simulationSeeds.join(", ")}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Total trials (this run)</dt>
+            <dd>{trialTotal}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Adaptive baselineDrive</dt>
+            <dd>{formatNumList(execSummary.adaptiveAxes.baselineDrives)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Adaptive motionWeight</dt>
+            <dd>{formatNumList(execSummary.adaptiveAxes.motionWeights)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Adaptive peerWeight</dt>
+            <dd>{formatNumList(execSummary.adaptiveAxes.peerWeights)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Adaptive τ peer (s)</dt>
+            <dd>{formatNumList(execSummary.adaptiveAxes.tauPeerSeconds)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Fixed scan intervals (s)</dt>
+            <dd>{formatNumList(execSummary.fixedAxes.scanIntervals)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Fixed advertise intervals (s)</dt>
+            <dd>{formatNumList(execSummary.fixedAxes.advIntervals)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Fixed scan windows (s)</dt>
+            <dd>{formatNumList(execSummary.fixedAxes.scanWindows)}</dd>
+          </div>
+          <div className="sweep-grid-details-row sweep-grid-details-row--block">
+            <dt>Timing anchors (adaptive)</dt>
+            <dd>
+              Low {ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.scanIntervalSeconds}s scan /{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.scanWindowSeconds}s window /{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.advIntervalSeconds}s adv; neutral{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.scanIntervalSeconds}s / {ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.scanWindowSeconds}
+              s / {ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.advIntervalSeconds}s; high{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.scanIntervalSeconds}s /{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.scanWindowSeconds}s /{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.advIntervalSeconds}s (burst{" "}
+              {ADAPTIVE_SWEEP_TIMING_ANCHORS.advertisingBurstDurationSeconds}s).
+            </dd>
+          </div>
+          <div className="sweep-grid-details-row sweep-grid-details-row--block">
+            <dt>Held adaptive constants</dt>
+            <dd>
+              τ motion {SWEEP_HELD_ADAPTIVE.tauMotionSeconds}s · motion gain {SWEEP_HELD_ADAPTIVE.motionGain} · peer gain{" "}
+              {SWEEP_HELD_ADAPTIVE.peerGain} · peer miss penalty {SWEEP_HELD_ADAPTIVE.peerMissPenalty} · energy downscale{" "}
+              {String(SWEEP_HELD_ADAPTIVE.allowEnergySavingDownscale)}
+            </dd>
+          </div>
+        </dl>
+      </details>
 
       <div className="sweep-actions">
         <button type="button" className="primary-button sweep-run-button" disabled={isSweepRunning} onClick={onRunSweep}>

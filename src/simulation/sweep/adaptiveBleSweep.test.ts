@@ -37,18 +37,23 @@ describe("adaptive BLE sweep", () => {
     expect(fullProduct).toBe(90);
     expect(quickProduct).toBe(54);
 
-    expect(fixedSweepPolicyCount()).toBe(27);
-    expect(adaptiveSweepPolicyCount()).toBe(quickProduct);
-    expect(policiesPerSweepSeed()).toBe(27 + quickProduct);
-    expect(buildSweepGridPolicies()).toHaveLength(quickProduct);
-    expect(buildSweepTrials("fast", "42")).toHaveLength(sweepTrialCount("fast"));
-    expect(buildSweepTrials("report", "42")).toHaveLength(sweepTrialCount("report"));
-    expect(sweepTrialCount("fast")).toBe(81);
-    expect(sweepTrialCount("report")).toBe(243);
+    expect(fixedSweepPolicyCount("quick")).toBe(27);
+    expect(adaptiveSweepPolicyCount("quick")).toBe(quickProduct);
+    expect(policiesPerSweepSeed("quick")).toBe(27 + quickProduct);
+    expect(buildSweepGridPolicies("quick")).toHaveLength(quickProduct);
+    expect(buildSweepTrials("fast", "42", { gridVariant: "quick" })).toHaveLength(
+      sweepTrialCount("fast", { gridVariant: "quick" })
+    );
+    expect(buildSweepTrials("report", "42", { gridVariant: "quick", reportSeedCount: 3 })).toHaveLength(
+      sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })
+    );
+    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(81);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(243);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(405);
   });
 
   it("quick grid includes low-duty and upscale corners (brackets Juxta on drive)", () => {
-    const policies = buildSweepGridPolicies();
+    const policies = buildSweepGridPolicies("quick");
     expect(policies.some((p) => p.baselineDrive === 0.12 && p.motionWeight === 0.22 && p.peerWeight === 0.35)).toBe(true);
     expect(policies.some((p) => p.baselineDrive === 0.45 && p.motionWeight === 0.5 && p.peerWeight === 0.85)).toBe(true);
     expect(policies.some((p) => p.peerWeight === 0.6 && p.tauPeerSeconds === 300)).toBe(true);
@@ -153,7 +158,7 @@ describe("adaptive BLE sweep", () => {
       animalCount: 2,
       pathNodeCount: 6
     };
-    const trials = buildSweepTrials("fast", tiny.seed);
+    const trials = buildSweepTrials("fast", tiny.seed, { gridVariant: "quick" });
     const baselineTrial = trials.find((t) => t.policyId === SWEEP_BASELINE_POLICY_ID);
     expect(baselineTrial).toBeDefined();
     const row = runSingleSweepTrialSync(tiny, baselineTrial!);

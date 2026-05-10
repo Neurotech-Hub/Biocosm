@@ -1,6 +1,6 @@
 import type { SimulationConfig } from "../types";
 import { SPECIES_PRESETS } from "../speciesPresets";
-import { seedsForSweepMode } from "./adaptiveBleSweep";
+import { DEFAULT_REPORT_SEED_COUNT, seedsForSweepMode } from "./adaptiveBleSweep";
 
 /** One row for the Sweep settings “Simulation source” summary (last built config). */
 export type SweepSimulationBriefRow = { label: string; value: string };
@@ -17,12 +17,15 @@ function formatSimHorizon(seconds: number): string {
 /** Human-readable lines describing world/radio/energy inputs taken from the built Simulation tab config. */
 export function buildSweepSimulationBrief(
   config: SimulationConfig,
-  sweepMode: "fast" | "report"
+  sweepMode: "fast" | "report",
+  options?: { reportSeedCount?: number }
 ): SweepSimulationBriefRow[] {
   const preset = SPECIES_PRESETS[config.speciesPresetId as keyof typeof SPECIES_PRESETS];
   const species = preset != null ? preset.commonName : config.speciesPresetId.replace(/_/g, " ");
 
-  const seeds = seedsForSweepMode(sweepMode, String(config.seed));
+  const seeds = seedsForSweepMode(sweepMode, String(config.seed), {
+    reportSeedCount: options?.reportSeedCount ?? DEFAULT_REPORT_SEED_COUNT
+  });
   const seedLine =
     sweepMode === "fast"
       ? `${seeds[0]} (matches Fast preview)`

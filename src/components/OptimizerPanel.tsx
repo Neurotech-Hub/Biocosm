@@ -6,8 +6,8 @@ import {
 } from "./OptimizerPlots";
 import type { SimulationConfig } from "../simulation/types";
 import { firmwarePolicyFromSweepSummary } from "../simulation/sweep/adaptiveBleSweep";
-import type { SweepResultBundle } from "../simulation/sweep/adaptiveBleSweep";
-import type { CandidatePick, SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
+import type { SweepBundleWithCandidates } from "../simulation/sweep/adaptiveBleSweep";
+import type { SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
 import { defaultOptimizerBounds } from "../simulation/optimizer/bounds";
 import {
   buildOptimizerMarkdownReport,
@@ -19,7 +19,7 @@ import type { OptimizerPipelineResult } from "../simulation/optimizer/pipeline";
 import { sweepSummaryForOptimizerCandidate } from "../simulation/optimizer/sweepSummaryForCandidate";
 import type { PredictedPolicyCandidate, VerifiedCandidateResult } from "../simulation/optimizer/types";
 
-export type SweepBundleWithCandidates = SweepResultBundle & { candidates: CandidatePick[] };
+export type { SweepBundleWithCandidates };
 
 export type OptimizerPanelProps = {
   baseConfig: SimulationConfig;

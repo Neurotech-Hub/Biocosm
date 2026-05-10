@@ -1334,6 +1334,79 @@ th {
   min-width: 0;
 }
 
+.sweep-report-seeds-control {
+  display: grid;
+  gap: 8px;
+}
+
+.sweep-report-seeds-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sweep-report-seeds-label span {
+  color: #a8bccf;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.sweep-report-seeds-label select {
+  background: #121b26;
+  border: 1px solid #26394e;
+  border-radius: 8px;
+  color: #e7eef6;
+  font-size: 0.85rem;
+  max-width: 100%;
+  padding: 0.45rem 0.55rem;
+}
+
+.sweep-grid-details {
+  background: #0d1620;
+  border: 1px solid #223245;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.sweep-grid-details summary {
+  color: #cce3f5;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  list-style-position: outside;
+  padding: 2px 0;
+}
+
+.sweep-grid-details-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.sweep-grid-details-row {
+  display: grid;
+  font-size: 0.76rem;
+  gap: 4px 10px;
+  grid-template-columns: minmax(120px, 38%) 1fr;
+  line-height: 1.35;
+}
+
+.sweep-grid-details-row--block {
+  grid-template-columns: 1fr;
+}
+
+.sweep-grid-details-row dt {
+  color: #7d92a5;
+  font-weight: 500;
+  margin: 0;
+}
+
+.sweep-grid-details-row dd {
+  color: #d6e2ef;
+  margin: 0;
+  word-break: break-word;
+}
+
 .sweep-actions {
   align-items: center;
   display: flex;

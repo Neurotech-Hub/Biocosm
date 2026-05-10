@@ -22,4 +22,11 @@ describe("buildSweepSimulationBrief", () => {
     expect(seeds).toContain("303");
     expect(seeds).toContain("aggregated");
   });
+
+  it("respects report seed count for the seeds line", () => {
+    const rows = buildSweepSimulationBrief(defaultSimulationConfig, "report", { reportSeedCount: 5 });
+    const seeds = rows.find((r) => r.label === "Seeds")?.value ?? "";
+    expect(seeds).toContain("101");
+    expect(seeds).toContain("505");
+  });
 });

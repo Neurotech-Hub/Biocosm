@@ -89,6 +89,17 @@ export function isFullSweepGrid(): boolean {
   return import.meta.env.VITE_SWEEP_FULL_GRID === "true";
 }
 
+/** Quick vs full Cartesian grids (same shapes as build-flag quick/full). */
+export type SweepGridVariant = "quick" | "full";
+
+export function defaultSweepGridVariant(): SweepGridVariant {
+  return isFullSweepGrid() ? "full" : "quick";
+}
+
+function resolveGridVariant(variant?: SweepGridVariant): SweepGridVariant {
+  return variant ?? defaultSweepGridVariant();
+}
+
 type SweepAxes = {
   baselineDrives: readonly number[];
   motionWeights: readonly number[];
@@ -96,14 +107,15 @@ type SweepAxes = {
   tauPeerSeconds: readonly number[];
 };
 
-type FixedSweepAxes = {
+export type FixedSweepAxes = {
   scanIntervals: readonly number[];
   advIntervals: readonly number[];
   scanWindows: readonly number[];
 };
 
-export function getFixedSweepAxes(): FixedSweepAxes {
-  if (isFullSweepGrid()) {
+export function getFixedSweepAxes(variant?: SweepGridVariant): FixedSweepAxes {
+  const v = resolveGridVariant(variant);
+  if (v === "full") {
     return {
       scanIntervals: SWEEP_FULL_FIXED_SCAN_INTERVALS,
       advIntervals: SWEEP_FULL_FIXED_ADV_INTERVALS,
@@ -117,8 +129,9 @@ export function getFixedSweepAxes(): FixedSweepAxes {
   };
 }
 
-export function getSweepAxes(): SweepAxes {
-  if (isFullSweepGrid()) {
+export function getSweepAxes(variant?: SweepGridVariant): SweepAxes {
+  const v = resolveGridVariant(variant);
+  if (v === "full") {
     return {
       baselineDrives: SWEEP_FULL_BASELINE_DRIVES,
       motionWeights: SWEEP_FULL_MOTION_WEIGHTS,
@@ -134,9 +147,9 @@ export function getSweepAxes(): SweepAxes {
   };
 }
 
-/** Number of adaptive policies in the active grid (24 quick, 90 full). */
-export function adaptiveSweepPolicyCount(): number {
-  const axes = getSweepAxes();
+/** Number of adaptive policies in the active grid (54 quick, 90 full). */
+export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
+  const axes = getSweepAxes(variant);
   return (
     axes.baselineDrives.length *
     axes.motionWeights.length *
@@ -146,24 +159,46 @@ export function adaptiveSweepPolicyCount(): number {
 }
 
 /** Number of fixed-rate policies per seed (includes Juxta 5.6 as baseline reference). */
-export function fixedSweepPolicyCount(): number {
-  const ax = getFixedSweepAxes();
+export function fixedSweepPolicyCount(variant?: SweepGridVariant): number {
+  const ax = getFixedSweepAxes(variant);
   return ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindows.length;
 }
 
 /** Policies per seed: full fixed grid + adaptive grid. */
-export function policiesPerSweepSeed(): number {
-  return fixedSweepPolicyCount() + adaptiveSweepPolicyCount();
+export function policiesPerSweepSeed(variant?: SweepGridVariant): number {
+  return fixedSweepPolicyCount(variant) + adaptiveSweepPolicyCount(variant);
 }
 
-/** Total simulation runs (fixed + adaptive trials), per spec seeds. */
-export function sweepTrialCount(mode: "fast" | "report"): number {
-  const perSeed = policiesPerSweepSeed();
-  const seeds = mode === "fast" ? 1 : SWEEP_REPORT_SEEDS.length;
-  return seeds * perSeed;
+/** Pool for report mode; first N used when report seed count is N (1–5). */
+export const SWEEP_REPORT_SEED_POOL = ["101", "202", "303", "404", "505"] as const;
+
+export const DEFAULT_REPORT_SEED_COUNT = 3;
+
+/** First `count` seeds from the report pool (clamped 1–5). */
+export function reportSeedsForCount(count: number): string[] {
+  const n = Math.min(5, Math.max(1, Math.floor(count)));
+  return Array.from(SWEEP_REPORT_SEED_POOL.slice(0, n));
 }
 
+/** @deprecated Use reportSeedsForCount(DEFAULT_REPORT_SEED_COUNT); kept for callers expecting three seeds. */
 export const SWEEP_REPORT_SEEDS = ["101", "202", "303"] as const;
+
+export type BuildSweepTrialsOptions = {
+  gridVariant?: SweepGridVariant;
+  /** Report mode only; default 3 (101, 202, 303). */
+  reportSeedCount?: number;
+};
+
+/** Total simulation runs (fixed + adaptive trials) for the selected seeds and grid. */
+export function sweepTrialCount(mode: "fast" | "report", options?: BuildSweepTrialsOptions): number {
+  const variant = resolveGridVariant(options?.gridVariant);
+  const perSeed = policiesPerSweepSeed(variant);
+  const seedRows =
+    mode === "fast"
+      ? 1
+      : reportSeedsForCount(options?.reportSeedCount ?? DEFAULT_REPORT_SEED_COUNT).length;
+  return seedRows * perSeed;
+}
 export const SWEEP_BASELINE_POLICY_ID = "sweep-baseline-juxta-fixed";
 
 export type SweepPolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
@@ -218,6 +253,8 @@ export type SweepResultBundle = {
   mode: "fast" | "report";
 };
 
+export type SweepBundleWithCandidates = SweepResultBundle & { candidates: CandidatePick[] };
+
 export function sweepAdaptivePolicyFromGrid(
   baselineDrive: number,
   motionWeight: number,
@@ -243,8 +280,8 @@ export function sweepAdaptivePolicyFromGrid(
   };
 }
 
-export function buildSweepGridPolicies(): MotionPeerAdaptivePolicyConfig[] {
-  const axes = getSweepAxes();
+export function buildSweepGridPolicies(variant?: SweepGridVariant): MotionPeerAdaptivePolicyConfig[] {
+  const axes = getSweepAxes(variant);
   const policies: MotionPeerAdaptivePolicyConfig[] = [];
   for (const baselineDrive of axes.baselineDrives) {
     for (const motionWeight of axes.motionWeights) {
@@ -271,8 +308,8 @@ function isJuxta56Schedule(
 }
 
 /** One entry per fixed-rate combo in the active grid; Juxta 5.6 is tagged `baseline_fixed`. */
-export function buildFixedSweepTrialDefs(): Omit<SweepTrial, "seed">[] {
-  const axes = getFixedSweepAxes();
+export function buildFixedSweepTrialDefs(variant?: SweepGridVariant): Omit<SweepTrial, "seed">[] {
+  const axes = getFixedSweepAxes(variant);
   const trials: Omit<SweepTrial, "seed">[] = [];
   for (const scanIntervalSeconds of axes.scanIntervals) {
     for (const advIntervalSeconds of axes.advIntervals) {
@@ -312,14 +349,28 @@ export function buildFixedSweepTrialDefs(): Omit<SweepTrial, "seed">[] {
   return trials;
 }
 
-export function seedsForSweepMode(mode: "fast" | "report", currentSeed: string): string[] {
-  return mode === "fast" ? [currentSeed] : [...SWEEP_REPORT_SEEDS];
+export function seedsForSweepMode(
+  mode: "fast" | "report",
+  currentSeed: string,
+  options?: Pick<BuildSweepTrialsOptions, "reportSeedCount">
+): string[] {
+  if (mode === "fast") {
+    return [currentSeed];
+  }
+  return reportSeedsForCount(options?.reportSeedCount ?? DEFAULT_REPORT_SEED_COUNT);
 }
 
-export function buildSweepTrials(mode: "fast" | "report", currentSeed: string): SweepTrial[] {
-  const seeds = seedsForSweepMode(mode, currentSeed);
-  const adaptivePolicies = buildSweepGridPolicies();
-  const fixedTrialDefs = buildFixedSweepTrialDefs();
+export function buildSweepTrials(
+  mode: "fast" | "report",
+  currentSeed: string,
+  options?: BuildSweepTrialsOptions
+): SweepTrial[] {
+  const variant = resolveGridVariant(options?.gridVariant);
+  const seeds = seedsForSweepMode(mode, currentSeed, {
+    reportSeedCount: options?.reportSeedCount
+  });
+  const adaptivePolicies = buildSweepGridPolicies(variant);
+  const fixedTrialDefs = buildFixedSweepTrialDefs(variant);
 
   const trials: SweepTrial[] = [];
   for (const seed of seeds) {
@@ -341,6 +392,39 @@ export function buildSweepTrials(mode: "fast" | "report", currentSeed: string): 
     }
   }
   return trials;
+}
+
+/** Counts and axes for the Sweep sidebar (“what this sweep exercises”). */
+export function sweepExecutionSummary(input: {
+  gridVariant: SweepGridVariant;
+  mode: "fast" | "report";
+  builtSeed: string;
+  reportSeedCount?: number;
+}): {
+  variant: SweepGridVariant;
+  adaptiveAxes: SweepAxes;
+  fixedAxes: FixedSweepAxes;
+  policiesPerSeed: number;
+  simulationSeeds: string[];
+  totalTrials: number;
+} {
+  const variant = resolveGridVariant(input.gridVariant);
+  const policiesPerSeed = policiesPerSweepSeed(variant);
+  const simulationSeeds = seedsForSweepMode(input.mode, input.builtSeed, {
+    reportSeedCount: input.reportSeedCount
+  });
+  const totalTrials = sweepTrialCount(input.mode, {
+    gridVariant: input.gridVariant,
+    reportSeedCount: input.reportSeedCount
+  });
+  return {
+    variant,
+    adaptiveAxes: getSweepAxes(variant),
+    fixedAxes: getFixedSweepAxes(variant),
+    policiesPerSeed,
+    simulationSeeds,
+    totalTrials
+  };
 }
 
 function computeMahPerDay(finalState: SimulationState, cumulativeMah: number): number {
@@ -592,7 +676,7 @@ export function buildSweepResultBundle(rawRows: SweepRawRow[], mode: "fast" | "r
 export function finalizeSweepBundle(
   rawRows: SweepRawRow[],
   mode: "fast" | "report"
-): SweepResultBundle & { candidates: CandidatePick[] } {
+): SweepBundleWithCandidates {
   const bundle = buildSweepResultBundle(rawRows, mode);
   const candidates = pickSweepCandidates(
     bundle.baselineSummary,

@@ -2,7 +2,7 @@ import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { InfoPopover } from "./InfoPopover";
 import type { SimulationConfig } from "../simulation/types";
 import type { CandidatePick, SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
-import type { SweepRawRow, SweepResultBundle } from "../simulation/sweep/adaptiveBleSweep";
+import type { SweepBundleWithCandidates, SweepRawRow } from "../simulation/sweep/adaptiveBleSweep";
 import {
   buildSweepMarkdownReport,
   serializeSweepRawCsv,
@@ -274,7 +274,7 @@ function metricStylesForRow(
 
 type SweepReportPanelProps = {
   baseConfig: SimulationConfig;
-  sweepResult: (SweepResultBundle & { candidates: CandidatePick[] }) | null;
+  sweepResult: SweepBundleWithCandidates | null;
   onSimulatePolicy?: (summary: SweepPolicySummary) => void;
   simulateDisabled?: boolean;
 };
@@ -389,7 +389,7 @@ export function SweepReportPanel({
             axesPopoverTitle="Capture rate vs energy — axes"
             axesPopoverChildren={SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY}
             title="Capture rate vs energy"
-            subtitle="Upper-left is better capture at lower energy (same layout as the Optimizer analysis chart)."
+            subtitle="Upper-left is better capture at lower energy (standard capture-vs-energy tradeoff plot)."
             xLabel="mAh/day"
             yLabel="BLE capture rate"
             baselinePoint={{

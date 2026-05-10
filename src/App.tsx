@@ -5,8 +5,6 @@ import { ControlsPanel } from "./components/ControlsPanel";
 import { LegendPanel } from "./components/LegendPanel";
 import { MetricsPanel } from "./components/MetricsPanel";
 import { RawDataPanel } from "./components/RawDataPanel";
-import { OptimizerControlsPanel } from "./components/OptimizerControlsPanel";
-import { OptimizerPanel, type SweepBundleWithCandidates } from "./components/OptimizerPanel";
 import { SweepControlsPanel } from "./components/SweepControlsPanel";
 import { SweepReportPanel } from "./components/SweepReportPanel";
 import { TimeSeriesPanel } from "./components/TimeSeriesPanel";
@@ -16,17 +14,14 @@ import { defaultSimulationConfig } from "./simulation/config";
 import { mergeLogs, stepSimulation } from "./simulation/engine";
 import {
   buildSweepTrials,
+  defaultSweepGridVariant,
   finalizeSweepBundle,
   firmwarePolicyFromSweepSummary,
-  runSweepTrialsChunked
+  runSweepTrialsChunked,
+  type SweepBundleWithCandidates,
+  type SweepGridVariant
 } from "./simulation/sweep/adaptiveBleSweep";
 import type { SweepPolicySummary } from "./simulation/sweep/sweepCandidates";
-import { defaultOptimizerBounds } from "./simulation/optimizer/bounds";
-import { runOptimizerPipelineFromBundle } from "./simulation/optimizer/pipeline";
-import type { OptimizerPipelineResult } from "./simulation/optimizer/pipeline";
-import { sweepSummaryForOptimizerCandidate } from "./simulation/optimizer/sweepSummaryForCandidate";
-import type { PredictedPolicyCandidate, VerifiedCandidateResult } from "./simulation/optimizer/types";
-import { verifyOptimizerCandidates } from "./simulation/optimizer/verificationRuns";
 import {
   buildAdaptiveBleTimeSeries,
   buildAnimalStripEvents,
@@ -40,7 +35,7 @@ import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationSta
 import { PLAYBACK_SPEED_MULTIPLIER } from "./playbackConstants";
 import { createInitialSimulation } from "./simulation/world";
 
-type WorkspaceTab = "simulator" | "sweep" | "optimizer";
+type WorkspaceTab = "simulator" | "sweep";
 
 export function App() {
   const [draftConfig, setDraftConfig] = useState<SimulationConfig>(defaultSimulationConfig);
@@ -54,24 +49,13 @@ export function App() {
   const [showObservedDetections, setShowObservedDetections] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("simulator");
   const [sweepMode, setSweepMode] = useState<"fast" | "report">("fast");
+  const [sweepGridVariant, setSweepGridVariant] = useState<SweepGridVariant>(() => defaultSweepGridVariant());
+  const [reportSeedCount, setReportSeedCount] = useState(3);
   const [sweepRunning, setSweepRunning] = useState(false);
   const [sweepProgress, setSweepProgress] = useState({ completed: 0, total: 0 });
   const [sweepResult, setSweepResult] = useState<SweepBundleWithCandidates | null>(null);
   const [sweepError, setSweepError] = useState<string | null>(null);
   const sweepAbortRef = useRef<AbortController | null>(null);
-  const [optimizerVerification, setOptimizerVerification] = useState<VerifiedCandidateResult[] | null>(null);
-  const [optimizerVerifyRunning, setOptimizerVerifyRunning] = useState(false);
-  const [optimizerVerifyProgress, setOptimizerVerifyProgress] = useState({ completed: 0, total: 0 });
-  const [optimizerPipeline, setOptimizerPipeline] = useState<OptimizerPipelineResult | null>(null);
-  const [optimizerRunError, setOptimizerRunError] = useState<string | null>(null);
-  const [optimizerWorkflowPhase, setOptimizerWorkflowPhase] = useState<"idle" | "optimizing" | "verifying">("idle");
-  const [optimizerCandidatePreset, setOptimizerCandidatePreset] = useState<5000 | 20000 | 50000>(20000);
-  const [optimizerSeedState, setOptimizerSeedState] = useState("optimizer-001");
-  const [optimizerRidgeLambdaStr, setOptimizerRidgeLambdaStr] = useState("0.0001");
-  const [optimizerAdvancedOpen, setOptimizerAdvancedOpen] = useState(false);
-  const [optimizerVerificationMode, setOptimizerVerificationMode] = useState<"builtSeedSingle" | "sweepSeedsMean">(
-    "builtSeedSingle"
-  );
   const timeline = build.timeline;
   const simulation = timeline[currentStep] ?? timeline[0];
   const totalSteps = Math.max(0, timeline.length - 1);
@@ -94,16 +78,13 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [isPlaying, totalSteps]);
 
-  useEffect(() => {
-    setOptimizerVerification(null);
-    setOptimizerPipeline(null);
-    setOptimizerRunError(null);
-  }, [sweepResult]);
-
   const runSweep = async () => {
     setSweepError(null);
     setSweepResult(null);
-    const trials = buildSweepTrials(sweepMode, String(builtConfig.seed));
+    const trials = buildSweepTrials(sweepMode, String(builtConfig.seed), {
+      gridVariant: sweepGridVariant,
+      reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined
+    });
     setSweepProgress({ completed: 0, total: trials.length });
     setSweepRunning(true);
     const controller = new AbortController();
@@ -154,84 +135,6 @@ export function App() {
     }, 0);
   };
 
-  const runOptimizerVerification = async (pipeline: OptimizerPipelineResult) => {
-    if (!sweepResult) {
-      return;
-    }
-    const verificationSeeds =
-      optimizerVerificationMode === "sweepSeedsMean" && sweepResult.seedsUsed.length > 0
-        ? [...sweepResult.seedsUsed]
-        : [String(builtConfig.seed)];
-    const items = pipeline.recommendations.picks
-      .filter((p) => p.candidate != null)
-      .map((p) => ({
-        recommendationRole: p.label,
-        candidate: p.candidate!,
-        sweepSummary: sweepSummaryForOptimizerCandidate(sweepResult, p.candidate!)
-      }));
-    if (items.length === 0) {
-      return;
-    }
-    setOptimizerVerifyRunning(true);
-    setOptimizerVerifyProgress({ completed: 0, total: items.length });
-    try {
-      const results = await verifyOptimizerCandidates(items, builtConfig, {
-        verificationSeeds,
-        verificationSeedMode: optimizerVerificationMode,
-        baselineSummary: sweepResult.baselineSummary,
-        onProgress: (completed, total) => setOptimizerVerifyProgress({ completed, total })
-      });
-      setOptimizerVerification(results);
-    } finally {
-      setOptimizerVerifyRunning(false);
-    }
-  };
-
-  const runOptimizer = async () => {
-    if (!sweepResult) {
-      return;
-    }
-    setOptimizerRunError(null);
-    setOptimizerVerification(null);
-    setOptimizerWorkflowPhase("optimizing");
-    await Promise.resolve();
-    try {
-      const ridgeLambda = Number(optimizerRidgeLambdaStr);
-      if (!Number.isFinite(ridgeLambda) || ridgeLambda < 0) {
-        throw new Error("Ridge lambda must be a non-negative number.");
-      }
-      const result = runOptimizerPipelineFromBundle(sweepResult, {
-        candidateCount: optimizerCandidatePreset,
-        optimizerSeed: optimizerSeedState,
-        bounds: defaultOptimizerBounds(),
-        ridgeLambda,
-        constrainCandidatesToTrainingEnvelope: true
-      });
-      setOptimizerPipeline(result);
-      setOptimizerWorkflowPhase("verifying");
-      await runOptimizerVerification(result);
-    } catch (e) {
-      setOptimizerPipeline(null);
-      setOptimizerRunError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setOptimizerWorkflowPhase("idle");
-    }
-  };
-
-  const retryOptimizerVerification = () => {
-    if (optimizerPipeline) {
-      void runOptimizerVerification(optimizerPipeline);
-    }
-  };
-
-  const simulateOptimizerRecommendation = (candidate: PredictedPolicyCandidate) => {
-    if (!sweepResult) {
-      return;
-    }
-    const summary = sweepSummaryForOptimizerCandidate(sweepResult, candidate);
-    simulateSweepPolicy(summary);
-  };
-
   const simulateSweepPolicy = (summary: SweepPolicySummary) => {
     if (!summary.params || buildProgress.isBuilding) {
       return;
@@ -277,14 +180,6 @@ export function App() {
               onClick={() => setWorkspaceTab("sweep")}
             >
               Sweep
-            </button>
-            <button
-              type="button"
-              className={`app-topnav-tab ${workspaceTab === "optimizer" ? "app-topnav-tab-active" : ""}`}
-              aria-current={workspaceTab === "optimizer" ? "page" : undefined}
-              onClick={() => setWorkspaceTab("optimizer")}
-            >
-              Optimizer
             </button>
           </nav>
 
@@ -374,7 +269,7 @@ export function App() {
           />
         </div>
       </section>
-      ) : workspaceTab === "sweep" ? (
+      ) : (
       <section className="workspace workspace-sweep-layout">
         <div className="visual-column">
           <SweepReportPanel
@@ -390,71 +285,15 @@ export function App() {
             isSimulationStale={isBuildDirty}
             sweepMode={sweepMode}
             onSweepModeChange={setSweepMode}
+            sweepGridVariant={sweepGridVariant}
+            onSweepGridVariantChange={setSweepGridVariant}
+            reportSeedCount={reportSeedCount}
+            onReportSeedCountChange={(n) => setReportSeedCount(Math.min(5, Math.max(1, n)))}
             isSweepRunning={sweepRunning}
             sweepProgress={sweepProgress}
             sweepError={sweepError}
             onRunSweep={runSweep}
             onCancelSweep={cancelSweep}
-          />
-        </div>
-      </section>
-      ) : (
-      <section className="workspace workspace-sweep-layout">
-        <div className="visual-column">
-          <OptimizerPanel
-            baseConfig={builtConfig}
-            sweepResult={sweepResult}
-            pipeline={optimizerPipeline}
-            candidatePreset={optimizerCandidatePreset}
-            optimizerSeed={optimizerSeedState}
-            verificationResults={optimizerVerification}
-            verificationRunning={optimizerVerifyRunning}
-            verificationProgress={optimizerVerifyProgress}
-            simulateDisabled={buildProgress.isBuilding || sweepRunning}
-            onSimulateRecommendation={simulateOptimizerRecommendation}
-            verificationMode={optimizerVerificationMode}
-            verificationSeeds={
-              optimizerVerificationMode === "sweepSeedsMean" && sweepResult?.seedsUsed.length
-                ? sweepResult.seedsUsed
-                : [String(builtConfig.seed)]
-            }
-          />
-        </div>
-        <div className="sidebar-column">
-          <OptimizerControlsPanel
-            candidatePreset={optimizerCandidatePreset}
-            onCandidatePresetChange={setOptimizerCandidatePreset}
-            optimizerSeed={optimizerSeedState}
-            onOptimizerSeedChange={setOptimizerSeedState}
-            ridgeLambdaStr={optimizerRidgeLambdaStr}
-            onRidgeLambdaStrChange={setOptimizerRidgeLambdaStr}
-            advancedOpen={optimizerAdvancedOpen}
-            onAdvancedOpenChange={setOptimizerAdvancedOpen}
-            workflowPhase={optimizerWorkflowPhase}
-            runError={optimizerRunError}
-            hasPipeline={Boolean(optimizerPipeline)}
-            verificationRunning={optimizerVerifyRunning}
-            verificationProgress={optimizerVerifyProgress}
-            verificationDisabled={buildProgress.isBuilding || sweepRunning}
-            verificationMode={optimizerVerificationMode}
-            onVerificationModeChange={setOptimizerVerificationMode}
-            baseSeedLabel={String(builtConfig.seed)}
-            sweepSeedsUsed={sweepResult?.seedsUsed ?? []}
-            hasSweepBundle={Boolean(sweepResult)}
-            onRunOptimizer={runOptimizer}
-            onRetryVerification={retryOptimizerVerification}
-            extraStatus={
-              !sweepResult ? (
-                <p className="helper-text warning-text">
-                  Run a sweep first to create optimizer training rows.
-                </p>
-              ) : isBuildDirty ? (
-                <p className="helper-text warning-text">
-                  Simulation controls changed after the last build — rebuild on the Simulator tab if you want verification to
-                  match edited assumptions.
-                </p>
-              ) : null
-            }
           />
         </div>
       </section>
