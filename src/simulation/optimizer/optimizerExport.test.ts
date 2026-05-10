@@ -71,14 +71,17 @@ describe("optimizerExport", () => {
 
     const recCsv = serializeOptimizerRecommendationsCsv(pipeline.recommendations.picks);
     expect(recCsv.split("\n")[0]).toContain("role");
-    expect(recCsv.split("\n").length).toBe(6);
+    expect(recCsv.split("\n").length).toBe(5);
 
     const md = buildOptimizerMarkdownReport({
       bundle,
       pipeline,
       bounds: defaultOptimizerBounds(),
       candidateCount: 100,
-      optimizerSeed: "export-test"
+      optimizerSeed: "export-test",
+      builtSeed: "1",
+      verificationMode: "builtSeedSingle",
+      verificationSeeds: ["1"]
     });
     expect(md).toContain("# Policy optimizer report");
     expect(md).toContain("## Model fit");

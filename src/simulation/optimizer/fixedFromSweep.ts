@@ -56,7 +56,11 @@ export function sweepFixedSummariesToCandidates(
       predictedRelativeEnergy: mah / base.energy,
       predictedRelativeEfficiency: eff / base.efficiency,
       isPredictedPareto: false,
-      recommendationTags: []
+      recommendationTags: [],
+      predictionClamped: false,
+      trainingNearestDistance: null,
+      trainingOutsideEnvelope: false,
+      trainingOutsideAxes: []
     };
   });
 }

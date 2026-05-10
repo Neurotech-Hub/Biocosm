@@ -49,18 +49,26 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
   return false;
 }
 
-/** Axis explanations — plain language for sweep chart popovers. */
+/** Axis explanations for sweep chart popovers — explicit x/y and units. */
 const SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY = (
   <dl className="metric-definition-list">
-    <dt>Across (horizontal)</dt>
+    <dt>X-axis (horizontal)</dt>
     <dd>
-      Estimated BLE energy for one collar over a full day, in milliamp-hours (mAh/day). Reading further <strong>right</strong>{" "}
-      means higher average draw for that policy.
+      Mean estimated BLE energy burden for one representative collar over a full simulated day, from the sweep summary row for that
+      policy. Values increase left to right; units are milliamp-hours per day (<strong>mAh/day</strong>). Each point is one policy;
+      fixed-rate and adaptive policies share this axis.
     </dd>
-    <dt>Up (vertical)</dt>
+    <dt>Y-axis (vertical)</dt>
     <dd>
-      BLE <strong>capture rate</strong>: fraction of social-contact opportunities where the simulated collar logged at least one
-      detection. Higher is better capture performance (0 = none, 1 = every opportunity).
+      Mean BLE <strong>capture rate</strong> for that policy (same sweep aggregation): the fraction of social-contact opportunities
+      in which the collar logged at least one BLE detection (0 = none, 1 = all opportunities). Higher on the chart means better
+      capture; compare points at similar x to see capture differences at comparable energy.
+    </dd>
+    <dt>Reading the tradeoff</dt>
+    <dd>
+      For this orientation, policies toward the <strong>upper-left</strong> combine relatively lower energy (smaller mAh/day) with
+      relatively higher capture — a favorable direction on both axes. Policies toward the lower-right use more energy for less
+      capture.
     </dd>
   </dl>
 );

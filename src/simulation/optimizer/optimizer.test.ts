@@ -8,6 +8,7 @@ import { accumulateXtXy, solveLinearSystem } from "./matrix";
 import { markPredictedPareto } from "./pareto";
 import { normalizeAdaptiveParams } from "./normalize";
 import { runOptimizerPipeline } from "./pipeline";
+import { RESPONSE_SURFACE_ENERGY_TARGET } from "./responseSurface";
 import type { PredictedPolicyCandidate } from "./types";
 
 function syntheticAdaptiveSummary(
@@ -116,7 +117,11 @@ describe("predicted Pareto", () => {
       predictedRelativeEnergy: rel,
       predictedRelativeEfficiency: rel,
       isPredictedPareto: false,
-      recommendationTags: []
+      recommendationTags: [],
+      predictionClamped: false,
+      trainingNearestDistance: 0,
+      trainingOutsideEnvelope: false,
+      trainingOutsideAxes: []
     });
 
     const cands = [mk("a", 0.5, 5), mk("b", 0.6, 6), mk("c", 0.55, 4)];
@@ -165,8 +170,44 @@ describe("runOptimizerPipeline", () => {
       r1.candidates[0]!.predictedCaptureRate,
       12
     );
-    expect(r1.recommendations.picks.length).toBe(5);
+    expect(r1.recommendations.picks.length).toBe(4);
     expect(r1.model.captureR2).toBeGreaterThan(0);
+    expect(r1.model.energyTarget).toBe(RESPONSE_SURFACE_ENERGY_TARGET);
+    expect(r1.calibrationDiagnostics.method).toBe("leaveOneOut");
+  });
+
+  it("constrains generated candidates to observed adaptive sweep coverage by default", () => {
+    const summaries = [
+      syntheticAdaptiveSummary("low", 0.12, 0.22, 0.35, 120, 0.4, 2),
+      syntheticAdaptiveSummary("high", 0.45, 0.5, 0.85, 600, 0.8, 8),
+      ...Array.from({ length: 20 }, (_, i) =>
+        syntheticAdaptiveSummary(
+          `mid-${i}`,
+          0.12 + (0.33 * i) / 19,
+          0.22 + (0.28 * i) / 19,
+          0.35 + (0.5 * i) / 19,
+          120 + (480 * i) / 19,
+          0.45 + i * 0.01,
+          2.2 + i * 0.1
+        )
+      )
+    ];
+
+    const result = runOptimizerPipeline({
+      summaries,
+      baselineSummary: baselineSummary(),
+      candidateCount: 200,
+      optimizerSeed: "coverage"
+    });
+
+    expect(result.constrainCandidatesToTrainingEnvelope).toBe(true);
+    expect(result.candidateGenerationBounds.baselineDrive.min).toBeCloseTo(0.12);
+    expect(result.candidateGenerationBounds.peerWeight.max).toBeCloseTo(0.85);
+    expect(
+      result.candidates
+        .filter((candidate) => candidate.source === "predicted_adaptive")
+        .every((candidate) => !candidate.trainingOutsideEnvelope)
+    ).toBe(true);
   });
 
   it("throws when too few training rows", () => {

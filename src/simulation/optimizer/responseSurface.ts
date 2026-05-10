@@ -5,6 +5,7 @@ import { normalizeAdaptiveParams } from "./normalize";
 
 export const DEFAULT_RIDGE_LAMBDA = 1e-4;
 export const MIN_ENERGY_FLOOR = 0.001;
+export const RESPONSE_SURFACE_ENERGY_TARGET = "logMahPerDay";
 
 export type OptimizerTrainingRow = {
   baselineDrive: number;
@@ -21,8 +22,22 @@ export type ResponseSurfaceModel = {
   energyCoefficients: number[];
   captureR2: number;
   energyR2: number;
+  energyLogR2: number;
+  energyTarget: typeof RESPONSE_SURFACE_ENERGY_TARGET;
   bounds: OptimizerBounds;
   ridgeLambda: number;
+};
+
+export type ResponseSurfaceCalibrationDiagnostics = {
+  rowCount: number;
+  method: "leaveOneOut";
+  skippedRows: number;
+  captureMae: number;
+  captureRmse: number;
+  energyMae: number;
+  energyRmse: number;
+  maxAbsCaptureError: number;
+  maxAbsEnergyError: number;
 };
 
 function dot(a: number[], b: number[]): number {
@@ -73,7 +88,7 @@ export function fitResponseSurface(
 
   const X: number[][] = [];
   const yCap: number[] = [];
-  const yEn: number[] = [];
+  const yEnergyLog: number[] = [];
 
   for (const row of rows) {
     const norm = normalizeAdaptiveParams(
@@ -85,7 +100,7 @@ export function fitResponseSurface(
     );
     X.push(featuresFromNormalized(norm));
     yCap.push(row.captureRate);
-    yEn.push(row.mahPerDay);
+    yEnergyLog.push(Math.log(Math.max(MIN_ENERGY_FLOOR, row.mahPerDay)));
   }
 
   const fitTarget = (y: number[]): { beta: number[]; r2: number } => {
@@ -100,14 +115,18 @@ export function fitResponseSurface(
   };
 
   const capFit = fitTarget(yCap);
-  const enFit = fitTarget(yEn);
+  const enFit = fitTarget(yEnergyLog);
+  const rawEnergy = rows.map((row) => row.mahPerDay);
+  const predictedEnergy = X.map((row) => Math.exp(dot(row, enFit.beta)));
 
   return {
     featureCount: OPTIMIZER_FEATURE_COUNT,
     captureCoefficients: capFit.beta,
     energyCoefficients: enFit.beta,
     captureR2: capFit.r2,
-    energyR2: enFit.r2,
+    energyR2: rSquared(rawEnergy, predictedEnergy),
+    energyLogR2: enFit.r2,
+    energyTarget: RESPONSE_SURFACE_ENERGY_TARGET,
     bounds,
     ridgeLambda
   };
@@ -134,9 +153,58 @@ export function predictResponseSurface(model: ResponseSurfaceModel, params: RawA
   );
   const phi = featuresFromNormalized(norm);
   let cap = dot(model.captureCoefficients, phi);
-  let energy = dot(model.energyCoefficients, phi);
+  let energy = Math.exp(dot(model.energyCoefficients, phi));
   cap = Math.min(1, Math.max(0, cap));
   energy = Math.max(MIN_ENERGY_FLOOR, energy);
   const bleEfficiency = energy > 0 ? cap / energy : 0;
   return { captureRate: cap, mahPerDay: energy, bleEfficiency };
+}
+
+function rootMeanSquare(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length);
+}
+
+function meanAbs(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + Math.abs(value), 0) / values.length;
+}
+
+export function computeResponseSurfaceCalibrationDiagnostics(
+  rows: OptimizerTrainingRow[],
+  bounds: OptimizerBounds,
+  ridgeLambda: number = DEFAULT_RIDGE_LAMBDA
+): ResponseSurfaceCalibrationDiagnostics {
+  const captureErrors: number[] = [];
+  const energyErrors: number[] = [];
+  let skippedRows = 0;
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const train = rows.filter((_, index) => index !== i);
+    if (train.length < OPTIMIZER_FEATURE_COUNT) {
+      skippedRows += 1;
+      continue;
+    }
+    const heldOut = rows[i]!;
+    const model = fitResponseSurface(train, bounds, ridgeLambda);
+    const pred = predictResponseSurface(model, heldOut);
+    captureErrors.push(pred.captureRate - heldOut.captureRate);
+    energyErrors.push(pred.mahPerDay - heldOut.mahPerDay);
+  }
+
+  return {
+    rowCount: rows.length,
+    method: "leaveOneOut",
+    skippedRows,
+    captureMae: meanAbs(captureErrors),
+    captureRmse: rootMeanSquare(captureErrors),
+    energyMae: meanAbs(energyErrors),
+    energyRmse: rootMeanSquare(energyErrors),
+    maxAbsCaptureError: captureErrors.reduce((max, value) => Math.max(max, Math.abs(value)), 0),
+    maxAbsEnergyError: energyErrors.reduce((max, value) => Math.max(max, Math.abs(value)), 0)
+  };
 }

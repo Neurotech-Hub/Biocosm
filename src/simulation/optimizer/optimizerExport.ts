@@ -34,6 +34,10 @@ const PRED_HEADERS = [
   "predictedRelativeEnergy",
   "predictedRelativeEfficiency",
   "isPredictedPareto",
+  "predictionClamped",
+  "trainingNearestDistance",
+  "trainingOutsideEnvelope",
+  "trainingOutsideAxes",
   "recommendationTags"
 ] as const;
 
@@ -59,6 +63,10 @@ export function serializeOptimizerPredictionsCsv(candidates: PredictedPolicyCand
         c.predictedRelativeEnergy,
         c.predictedRelativeEfficiency,
         c.isPredictedPareto,
+        c.predictionClamped,
+        c.trainingNearestDistance ?? "",
+        c.trainingOutsideEnvelope,
+        c.trainingOutsideAxes.join(";"),
         c.recommendationTags.join(";")
       ]
         .map(csvEscape)
@@ -85,7 +93,11 @@ const REC_HEADERS = [
   "predictedRelativeCapture",
   "predictedRelativeEnergy",
   "predictedRelativeEfficiency",
-  "isPredictedPareto"
+  "isPredictedPareto",
+  "predictionClamped",
+  "trainingNearestDistance",
+  "trainingOutsideEnvelope",
+  "trainingOutsideAxes"
 ] as const;
 
 export function serializeOptimizerRecommendationsCsv(picks: RecommendationPick[]): string {
@@ -110,7 +122,11 @@ export function serializeOptimizerRecommendationsCsv(picks: RecommendationPick[]
         c?.predictedRelativeCapture ?? "",
         c?.predictedRelativeEnergy ?? "",
         c?.predictedRelativeEfficiency ?? "",
-        c?.isPredictedPareto ?? ""
+        c?.isPredictedPareto ?? "",
+        c?.predictionClamped ?? "",
+        c?.trainingNearestDistance ?? "",
+        c?.trainingOutsideEnvelope ?? "",
+        c?.trainingOutsideAxes.join(";") ?? ""
       ]
         .map(csvEscape)
         .join(",")
@@ -122,15 +138,39 @@ export function serializeOptimizerRecommendationsCsv(picks: RecommendationPick[]
 const VER_HEADERS = [
   "candidateId",
   "recommendationRole",
+  "source",
+  "sweepPolicyId",
+  "baselineDrive",
+  "motionWeight",
+  "peerWeight",
+  "tauPeerSeconds",
+  "fixedScanIntervalSeconds",
+  "fixedScanWindowSeconds",
+  "fixedAdvIntervalSeconds",
+  "verificationSeedMode",
+  "verificationSeeds",
+  "predictionClamped",
+  "trainingNearestDistance",
+  "trainingOutsideEnvelope",
+  "trainingOutsideAxes",
   "predictedCaptureRate",
   "verifiedCaptureRate",
   "predictedMahPerDay",
   "verifiedMahPerDay",
   "predictedBleEfficiency",
   "verifiedBleEfficiency",
+  "predictedRelativeCapture",
+  "verifiedRelativeCapture",
+  "predictedRelativeEnergy",
+  "verifiedRelativeEnergy",
+  "predictedRelativeEfficiency",
+  "verifiedRelativeEfficiency",
   "capturePredictionError",
   "energyPredictionError",
-  "efficiencyPredictionError"
+  "efficiencyPredictionError",
+  "captureRelativeError",
+  "energyRelativeError",
+  "efficiencyRelativeError"
 ] as const;
 
 export function serializeOptimizerVerificationCsv(rows: VerifiedCandidateResult[]): string {
@@ -140,15 +180,39 @@ export function serializeOptimizerVerificationCsv(rows: VerifiedCandidateResult[
       [
         r.candidateId,
         r.recommendationRole,
+        r.source,
+        r.sweepPolicyId,
+        r.baselineDrive,
+        r.motionWeight,
+        r.peerWeight,
+        r.tauPeerSeconds,
+        r.fixedScanIntervalSeconds ?? "",
+        r.fixedScanWindowSeconds ?? "",
+        r.fixedAdvIntervalSeconds ?? "",
+        r.verificationSeedMode,
+        r.verificationSeeds.join(";"),
+        r.predictionClamped,
+        r.trainingNearestDistance ?? "",
+        r.trainingOutsideEnvelope,
+        r.trainingOutsideAxes.join(";"),
         r.predictedCaptureRate,
         r.verifiedCaptureRate,
         r.predictedMahPerDay,
         r.verifiedMahPerDay,
         r.predictedBleEfficiency,
         r.verifiedBleEfficiency,
+        r.predictedRelativeCapture,
+        r.verifiedRelativeCapture,
+        r.predictedRelativeEnergy,
+        r.verifiedRelativeEnergy,
+        r.predictedRelativeEfficiency,
+        r.verifiedRelativeEfficiency,
         r.capturePredictionError,
         r.energyPredictionError,
-        r.efficiencyPredictionError
+        r.efficiencyPredictionError,
+        r.captureRelativeError,
+        r.energyRelativeError,
+        r.efficiencyRelativeError
       ]
         .map(csvEscape)
         .join(",")
@@ -190,6 +254,9 @@ export type OptimizerMarkdownInput = {
   bounds: OptimizerBounds;
   candidateCount: number;
   optimizerSeed: string;
+  builtSeed: string;
+  verificationMode: "builtSeedSingle" | "sweepSeedsMean";
+  verificationSeeds: string[];
   verification?: VerifiedCandidateResult[];
 };
 
@@ -206,21 +273,54 @@ export function buildOptimizerMarkdownReport(input: OptimizerMarkdownInput): str
   lines.push(`- Summary rows: ${bundle.summaries.length}`);
   lines.push(`- Raw rows: ${bundle.rawRows.length}`);
   lines.push(`- Baseline policy: ${bundle.baselineSummary.policyId} (${bundle.baselineSummary.label})`);
+  lines.push(`- Built simulation seed (at optimizer run): ${input.builtSeed}`);
+  lines.push(
+    `- Verification protocol: ${
+      input.verificationMode === "builtSeedSingle" ? "built seed only" : "mean over selected seeds"
+    }`
+  );
+  lines.push(`- Verification seeds: ${input.verificationSeeds.join(", ")}`);
+  lines.push(
+    `- Verification seed in sweep set: ${
+      bundle.seedsUsed.includes(input.builtSeed) ? "yes" : "no"
+    }`
+  );
   lines.push("");
   lines.push("## Model fit");
   lines.push(`- Training adaptive rows: ${pipeline.trainingRowCount}`);
   lines.push(`- Feature count: ${m.featureCount}`);
   lines.push(`- Ridge lambda: ${m.ridgeLambda}`);
+  lines.push(`- Energy target: ${m.energyTarget}`);
   lines.push(`- R² capture: ${m.captureR2.toFixed(6)}`);
   lines.push(`- R² energy (mAh/day): ${m.energyR2.toFixed(6)}`);
+  lines.push(`- R² energy target space: ${m.energyLogR2.toFixed(6)}`);
+  lines.push(
+    `- Leave-one-out calibration: capture MAE ${pipeline.calibrationDiagnostics.captureMae.toFixed(4)}, RMSE ${pipeline.calibrationDiagnostics.captureRmse.toFixed(4)}; energy MAE ${pipeline.calibrationDiagnostics.energyMae.toFixed(4)} mAh/day, RMSE ${pipeline.calibrationDiagnostics.energyRmse.toFixed(4)} mAh/day`
+  );
+  if (pipeline.calibrationDiagnostics.skippedRows > 0) {
+    lines.push(`- Leave-one-out skipped rows: ${pipeline.calibrationDiagnostics.skippedRows}`);
+  }
   lines.push("");
   lines.push("## Candidate generation");
   lines.push(`- Seed: ${input.optimizerSeed}`);
   lines.push(`- Candidate count: ${input.candidateCount}`);
-  lines.push(`- baselineDrive: [${bounds.baselineDrive.min}, ${bounds.baselineDrive.max}]`);
-  lines.push(`- motionWeight: [${bounds.motionWeight.min}, ${bounds.motionWeight.max}]`);
-  lines.push(`- peerWeight: [${bounds.peerWeight.min}, ${bounds.peerWeight.max}]`);
-  lines.push(`- tauPeerSeconds (log-uniform): [${bounds.tauPeerSeconds.min}, ${bounds.tauPeerSeconds.max}]`);
+  lines.push(`- Constrained to observed adaptive sweep coverage: ${pipeline.constrainCandidatesToTrainingEnvelope ? "yes" : "no"}`);
+  lines.push(`- Configured baselineDrive: [${bounds.baselineDrive.min}, ${bounds.baselineDrive.max}]`);
+  lines.push(`- Configured motionWeight: [${bounds.motionWeight.min}, ${bounds.motionWeight.max}]`);
+  lines.push(`- Configured peerWeight: [${bounds.peerWeight.min}, ${bounds.peerWeight.max}]`);
+  lines.push(`- Configured tauPeerSeconds (log-uniform): [${bounds.tauPeerSeconds.min}, ${bounds.tauPeerSeconds.max}]`);
+  lines.push(
+    `- Generated baselineDrive: [${pipeline.candidateGenerationBounds.baselineDrive.min}, ${pipeline.candidateGenerationBounds.baselineDrive.max}]`
+  );
+  lines.push(
+    `- Generated motionWeight: [${pipeline.candidateGenerationBounds.motionWeight.min}, ${pipeline.candidateGenerationBounds.motionWeight.max}]`
+  );
+  lines.push(
+    `- Generated peerWeight: [${pipeline.candidateGenerationBounds.peerWeight.min}, ${pipeline.candidateGenerationBounds.peerWeight.max}]`
+  );
+  lines.push(
+    `- Generated tauPeerSeconds: [${pipeline.candidateGenerationBounds.tauPeerSeconds.min}, ${pipeline.candidateGenerationBounds.tauPeerSeconds.max}]`
+  );
   lines.push("");
   lines.push("## Recommended candidates");
   for (const p of pipeline.recommendations.picks) {
@@ -245,12 +345,15 @@ export function buildOptimizerMarkdownReport(input: OptimizerMarkdownInput): str
     }
     lines.push(`- Params: baselineDrive=${c.baselineDrive}, motionWeight=${c.motionWeight}, peerWeight=${c.peerWeight}, tauPeerSeconds=${c.tauPeerSeconds}`);
     lines.push(`- Predicted capture: ${c.predictedCaptureRate.toFixed(6)}, mAh/day: ${c.predictedMahPerDay.toFixed(6)}, efficiency: ${c.predictedBleEfficiency.toFixed(6)}`);
+    lines.push(
+      `- Training coverage: nearest normalized distance=${c.trainingNearestDistance == null ? "n/a" : c.trainingNearestDistance.toFixed(4)}, outside envelope=${c.trainingOutsideEnvelope ? "yes" : "no"}, clamped=${c.predictionClamped ? "yes" : "no"}`
+    );
   }
   lines.push("");
   if (input.verification && input.verification.length > 0) {
     lines.push("## Verification (per recommendation role)");
     for (const v of input.verification) {
-      lines.push(`- **${v.recommendationRole}** (${v.candidateId}): predicted capture ${v.predictedCaptureRate.toFixed(4)} → verified ${v.verifiedCaptureRate.toFixed(4)}; mAh/day ${v.predictedMahPerDay.toFixed(4)} → ${v.verifiedMahPerDay.toFixed(4)}`);
+      lines.push(`- **${v.recommendationRole}** (${v.candidateId}): predicted capture ${v.predictedCaptureRate.toFixed(4)} → verified ${v.verifiedCaptureRate.toFixed(4)}; mAh/day ${v.predictedMahPerDay.toFixed(4)} → ${v.verifiedMahPerDay.toFixed(4)}; relative energy error ${(v.energyRelativeError * 100).toFixed(1)}%`);
     }
     lines.push("");
     lines.push("### Prediction vs verification agreement");

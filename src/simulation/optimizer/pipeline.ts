@@ -9,10 +9,16 @@ import { clampPredictionToTrainingEnvelope } from "./predictionEnvelope";
 import { computeRecommendations } from "./recommendations";
 import {
   DEFAULT_RIDGE_LAMBDA,
+  computeResponseSurfaceCalibrationDiagnostics,
   fitResponseSurface,
   predictResponseSurface,
+  type ResponseSurfaceCalibrationDiagnostics,
   type ResponseSurfaceModel
 } from "./responseSurface";
+import {
+  constrainBoundsToTrainingRows,
+  trainingCoverageForCandidate
+} from "./trainingCoverage";
 import type { PredictedPolicyCandidate } from "./types";
 import type { RecommendationSet } from "./types";
 
@@ -23,11 +29,16 @@ export type OptimizerPipelineInput = {
   optimizerSeed: string;
   bounds?: OptimizerBounds;
   ridgeLambda?: number;
+  /** Keep generated adaptive candidates inside observed adaptive sweep coverage. Defaults to true. */
+  constrainCandidatesToTrainingEnvelope?: boolean;
 };
 
 export type OptimizerPipelineResult = {
   model: ResponseSurfaceModel;
   trainingRowCount: number;
+  calibrationDiagnostics: ResponseSurfaceCalibrationDiagnostics;
+  candidateGenerationBounds: OptimizerBounds;
+  constrainCandidatesToTrainingEnvelope: boolean;
   candidates: PredictedPolicyCandidate[];
   recommendations: RecommendationSet;
   baselineSummary: SweepPolicySummary;
@@ -47,13 +58,18 @@ function baselineSafeRatios(baseline: SweepPolicySummary): {
 export function runOptimizerPipeline(input: OptimizerPipelineInput): OptimizerPipelineResult {
   const bounds = input.bounds ?? defaultOptimizerBounds();
   const ridgeLambda = input.ridgeLambda ?? DEFAULT_RIDGE_LAMBDA;
+  const constrainCandidatesToTrainingEnvelope = input.constrainCandidatesToTrainingEnvelope ?? true;
 
   const trainingRows = sweepSummariesToTrainingRows(input.summaries);
   const model = fitResponseSurface(trainingRows, bounds, ridgeLambda);
+  const calibrationDiagnostics = computeResponseSurfaceCalibrationDiagnostics(trainingRows, bounds, ridgeLambda);
 
   const base = baselineSafeRatios(input.baselineSummary);
+  const candidateGenerationBounds = constrainCandidatesToTrainingEnvelope
+    ? constrainBoundsToTrainingRows(bounds, trainingRows)
+    : bounds;
 
-  const rawAdaptive = generateAdaptiveCandidates(input.candidateCount, input.optimizerSeed, bounds);
+  const rawAdaptive = generateAdaptiveCandidates(input.candidateCount, input.optimizerSeed, candidateGenerationBounds);
 
   const adaptiveCandidates: PredictedPolicyCandidate[] = rawAdaptive.map((p, index) => {
     const id = `cand-${String(index).padStart(6, "0")}`;
@@ -66,6 +82,7 @@ export function runOptimizerPipeline(input: OptimizerPipelineInput): OptimizerPi
       },
       trainingRows
     );
+    const coverage = trainingCoverageForCandidate(p, trainingRows, bounds);
     const relCap = env.captureRate / base.capture;
     const relEn = env.mahPerDay / base.energy;
     const relEff = env.bleEfficiency / base.efficiency;
@@ -88,7 +105,11 @@ export function runOptimizerPipeline(input: OptimizerPipelineInput): OptimizerPi
       predictedRelativeEnergy: relEn,
       predictedRelativeEfficiency: relEff,
       isPredictedPareto: false,
-      recommendationTags: []
+      recommendationTags: [],
+      predictionClamped: env.clamped,
+      trainingNearestDistance: coverage.nearestDistance,
+      trainingOutsideEnvelope: coverage.outsideEnvelope,
+      trainingOutsideAxes: coverage.outsideAxes
     };
   });
 
@@ -102,6 +123,9 @@ export function runOptimizerPipeline(input: OptimizerPipelineInput): OptimizerPi
   return {
     model,
     trainingRowCount: trainingRows.length,
+    calibrationDiagnostics,
+    candidateGenerationBounds,
+    constrainCandidatesToTrainingEnvelope,
     candidates,
     recommendations,
     baselineSummary: input.baselineSummary
@@ -111,7 +135,13 @@ export function runOptimizerPipeline(input: OptimizerPipelineInput): OptimizerPi
 /** Convenience: bundle from finalizeSweepBundle. */
 export function runOptimizerPipelineFromBundle(
   bundle: SweepResultBundle,
-  options: { candidateCount: number; optimizerSeed: string; bounds?: OptimizerBounds; ridgeLambda?: number }
+  options: {
+    candidateCount: number;
+    optimizerSeed: string;
+    bounds?: OptimizerBounds;
+    ridgeLambda?: number;
+    constrainCandidatesToTrainingEnvelope?: boolean;
+  }
 ): OptimizerPipelineResult {
   return runOptimizerPipeline({
     summaries: bundle.summaries,
@@ -119,6 +149,7 @@ export function runOptimizerPipelineFromBundle(
     candidateCount: options.candidateCount,
     optimizerSeed: options.optimizerSeed,
     bounds: options.bounds,
-    ridgeLambda: options.ridgeLambda
+    ridgeLambda: options.ridgeLambda,
+    constrainCandidatesToTrainingEnvelope: options.constrainCandidatesToTrainingEnvelope
   });
 }

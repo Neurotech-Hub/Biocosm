@@ -18,7 +18,6 @@ export function computeRecommendations(candidates: PredictedPolicyCandidate[]): 
         rolePick("energySaving", "Energy-saving", null, "No candidates generated."),
         rolePick("balanced", "Balanced", null, "No candidates generated."),
         rolePick("highCapture", "High capture", null, "No candidates generated."),
-        rolePick("maxEfficiency", "Max efficiency", null, "No candidates generated."),
         rolePick("paretoKnee", "Pareto knee", null, "No candidates generated.")
       ]
     };
@@ -80,16 +79,7 @@ export function computeRecommendations(candidates: PredictedPolicyCandidate[]): 
   tagCandidate(hiPick, "High capture");
   picks.push(rolePick("highCapture", "High capture", hiPick));
 
-  // §10.4 Max efficiency
-  const meEligible = candidates.filter((c) => c.predictedRelativeCapture >= 0.8);
-  const mePool = meEligible.length > 0 ? meEligible : candidates;
-  const mePick = mePool.reduce((a, b) =>
-    a.predictedBleEfficiency >= b.predictedBleEfficiency ? a : b
-  );
-  tagCandidate(mePick, "Max efficiency");
-  picks.push(rolePick("maxEfficiency", "Max efficiency", mePick));
-
-  // §10.5 Pareto knee
+  // §10.4 Pareto knee
   const pareto = candidates.filter((c) => c.isPredictedPareto);
   let kneePick: PredictedPolicyCandidate | null = null;
   if (pareto.length === 1) {

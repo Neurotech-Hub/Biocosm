@@ -1134,117 +1134,6 @@ input[type="range"] {
   gap: 4px;
 }
 
-.adaptive-mini-panel {
-  background: #121b26;
-  border: 1px solid #243549;
-  border-radius: 18px;
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-}
-
-.adaptive-mini-panel h4 {
-  font-size: 0.92rem;
-  margin: 0;
-}
-
-.adaptive-mini-header {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr;
-}
-
-.adaptive-sparkline {
-  background: #0d1620;
-  border: 1px solid #223245;
-  border-radius: 12px;
-  height: 86px;
-  padding: 8px;
-  width: 100%;
-}
-
-.adaptive-sparkline line {
-  stroke: rgba(231, 238, 246, 0.28);
-  stroke-dasharray: 4 4;
-}
-
-.adaptive-sparkline polyline {
-  fill: none;
-  stroke: #7dd3fc;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.5;
-}
-
-.adaptive-sparkline circle {
-  fill: #72e6ac;
-}
-
-.adaptive-sparkline text {
-  fill: #90a4b8;
-  font-size: 10px;
-}
-
-.adaptive-drive-bands,
-.adaptive-schedule-chips {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.adaptive-drive-bands span,
-.adaptive-schedule-chips span {
-  background: #0d1620;
-  border: 1px solid #223245;
-  border-radius: 10px;
-  color: #b7c8d8;
-  font-size: 0.72rem;
-  padding: 8px;
-}
-
-.drive-breakdown {
-  align-items: end;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.drive-breakdown div {
-  display: grid;
-  gap: 3px;
-}
-
-.drive-breakdown span {
-  color: #90a4b8;
-  font-size: 0.76rem;
-}
-
-.drive-breakdown strong {
-  color: #ffffff;
-  font-size: 1.25rem;
-}
-
-.drive-contribution-bar {
-  background: #0d1620;
-  border-radius: 999px;
-  display: flex;
-  height: 10px;
-  overflow: hidden;
-}
-
-.drive-contribution-bar span:nth-child(1) {
-  background: #7dd3fc;
-}
-
-.drive-contribution-bar span:nth-child(2) {
-  background: #fbbf24;
-}
-
-.drive-contribution-bar span:nth-child(3) {
-  background: #72e6ac;
-}
-
 .warning-text {
   color: #fbbf24;
 }
@@ -1787,11 +1676,6 @@ th {
   margin-top: 16px;
 }
 
-.sweep-report-shortcut {
-  margin-bottom: 12px;
-  width: 100%;
-}
-
 .optimizer-controls {
   align-items: flex-end;
   display: flex;
@@ -1802,6 +1686,16 @@ th {
 
 .optimizer-controls .build-button-primary {
   width: auto;
+}
+
+.optimizer-simulating-status {
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 8px;
+  color: #bae6fd;
+  font-size: 0.82rem;
+  margin: 8px 0 10px;
+  padding: 6px 10px;
 }
 
 .optimizer-control {
@@ -1848,6 +1742,27 @@ th {
 
 .optimizer-model-summary {
   margin-top: 8px;
+}
+
+.optimizer-diagnostics-line {
+  margin-top: 10px;
+}
+
+.optimizer-verification-warning {
+  background: rgba(251, 191, 36, 0.11);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  border-radius: 12px;
+  margin-top: 14px;
+  padding: 12px;
+}
+
+.optimizer-verification-warning h3 {
+  color: #fde68a;
+  margin: 0 0 6px;
+}
+
+.optimizer-verification-warning p {
+  margin: 0;
 }
 
 .optimizer-model-summary h3 {
@@ -1961,4 +1876,8 @@ th {
 
 .optimizer-downloads {
   margin-top: 18px;
+}
+
+.optimizer-shell-panel .sweep-placeholder-card {
+  margin-top: 10px;
 }

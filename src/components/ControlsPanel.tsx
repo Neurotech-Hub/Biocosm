@@ -35,7 +35,6 @@ type ControlsPanelProps = {
   onBuildSimulation: () => void;
   onShowTrueProximityChange: (show: boolean) => void;
   onShowObservedDetectionsChange: (show: boolean) => void;
-  onOpenSweepReport?: () => void;
 };
 
 type BuildProgress = {
@@ -53,8 +52,7 @@ export function ControlsPanel({
   onResetSettingsToDefaults,
   onBuildSimulation,
   onShowTrueProximityChange,
-  onShowObservedDetectionsChange,
-  onOpenSweepReport
+  onShowObservedDetectionsChange
 }: ControlsPanelProps) {
   const [isAdvancedSpeciesOpen, setIsAdvancedSpeciesOpen] = useState(false);
   const [unlockNeutralAnchor, setUnlockNeutralAnchor] = useState(false);
@@ -158,12 +156,6 @@ export function ControlsPanel({
       ) : null}
       {isBuildDirty ? (
         <p className="helper-text">Settings changed. Build the simulation to update the canvas, timeline, logs, and metrics.</p>
-      ) : null}
-
-      {onOpenSweepReport ? (
-        <button type="button" className="secondary-button sweep-report-shortcut" onClick={onOpenSweepReport}>
-          Open Sweep
-        </button>
       ) : null}
 
       <section className="control-section">

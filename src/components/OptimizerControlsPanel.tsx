@@ -19,7 +19,11 @@ export type OptimizerControlsPanelProps = {
   verificationRunning: boolean;
   verificationProgress: { completed: number; total: number };
   verificationDisabled: boolean;
+  verificationMode: "builtSeedSingle" | "sweepSeedsMean";
+  onVerificationModeChange: (mode: "builtSeedSingle" | "sweepSeedsMean") => void;
   baseSeedLabel: string;
+  sweepSeedsUsed: string[];
+  hasSweepBundle: boolean;
   onRunOptimizer: () => void;
   onRetryVerification: () => void;
   /** Optional status line under actions (e.g. sweep stale warning). */
@@ -41,7 +45,11 @@ export function OptimizerControlsPanel({
   verificationRunning,
   verificationProgress,
   verificationDisabled,
+  verificationMode,
+  onVerificationModeChange,
   baseSeedLabel,
+  sweepSeedsUsed,
+  hasSweepBundle,
   onRunOptimizer,
   onRetryVerification,
   extraStatus
@@ -93,7 +101,7 @@ export function OptimizerControlsPanel({
             disabled={busy}
           />
         </label>
-        <button type="button" className="build-button-primary" disabled={busy} onClick={onRunOptimizer}>
+        <button type="button" className="build-button-primary" disabled={busy || !hasSweepBundle} onClick={onRunOptimizer}>
           {workflowPhase === "optimizing" ? "Optimizing…" : "Run optimizer"}
         </button>
         <button
@@ -103,15 +111,18 @@ export function OptimizerControlsPanel({
           onClick={onRetryVerification}
           title="Re-run verification simulations for the current recommendation set"
         >
-          {verificationRunning
-            ? `Simulating… ${verificationProgress.completed}/${verificationProgress.total}`
-            : "Retry verification"}
+          Retry verification
         </button>
       </div>
 
       {phaseLabel ? (
         <p className="optimizer-workflow-status helper-text" aria-live="polite">
           {phaseLabel}
+        </p>
+      ) : null}
+      {verificationRunning ? (
+        <p className="optimizer-simulating-status" aria-live="polite">
+          Simulating verification runs… {verificationProgress.completed}/{verificationProgress.total}
         </p>
       ) : null}
 
@@ -124,10 +135,34 @@ export function OptimizerControlsPanel({
         {advancedOpen ? "Hide advanced" : "Advanced"}
       </button>
       {advancedOpen ? (
-        <label className="optimizer-control optimizer-ridge">
-          <span>Ridge λ</span>
-          <input value={ridgeLambdaStr} onChange={(e) => onRidgeLambdaStrChange(e.target.value)} disabled={busy} />
-        </label>
+        <>
+          <label className="optimizer-control optimizer-ridge">
+            <span>Ridge λ</span>
+            <input value={ridgeLambdaStr} onChange={(e) => onRidgeLambdaStrChange(e.target.value)} disabled={busy} />
+          </label>
+          <label className="optimizer-control optimizer-verify-mode">
+            <span>Verification protocol</span>
+            <select
+              value={verificationMode}
+              onChange={(e) =>
+                onVerificationModeChange(
+                  e.target.value === "sweepSeedsMean" ? "sweepSeedsMean" : "builtSeedSingle"
+                )
+              }
+              disabled={busy || !hasSweepBundle}
+            >
+              <option value="builtSeedSingle">Built seed only</option>
+              <option value="sweepSeedsMean">Mean over sweep seeds</option>
+            </select>
+          </label>
+          <p className="helper-text optimizer-verify-mode-note">
+            {verificationMode === "builtSeedSingle"
+              ? `Single-seed verification uses built seed ${baseSeedLabel}.`
+              : `Mean verification uses sweep seeds: ${
+                  sweepSeedsUsed.length > 0 ? sweepSeedsUsed.join(", ") : "none"
+                }.`}
+          </p>
+        </>
       ) : null}
 
       {runError ? <p className="optimizer-error">{runError}</p> : null}

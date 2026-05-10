@@ -23,13 +23,15 @@ export type SweepBundleWithCandidates = SweepResultBundle & { candidates: Candid
 
 export type OptimizerPanelProps = {
   baseConfig: SimulationConfig;
-  sweepResult: SweepBundleWithCandidates;
+  sweepResult: SweepBundleWithCandidates | null;
   pipeline: OptimizerPipelineResult | null;
   candidatePreset: number;
   optimizerSeed: string;
   verificationResults?: VerifiedCandidateResult[] | null;
   verificationRunning?: boolean;
   verificationProgress?: { completed: number; total: number };
+  verificationMode: "builtSeedSingle" | "sweepSeedsMean";
+  verificationSeeds: string[];
   simulateDisabled?: boolean;
   onSimulateRecommendation?: (candidate: PredictedPolicyCandidate) => void;
 };
@@ -99,9 +101,31 @@ export function OptimizerPanel({
   verificationResults,
   verificationRunning = false,
   verificationProgress,
+  verificationMode,
+  verificationSeeds,
   simulateDisabled = false,
   onSimulateRecommendation
 }: OptimizerPanelProps) {
+  if (!sweepResult) {
+    return (
+      <div className="panel optimizer-panel optimizer-shell-panel">
+        <div className="panel-title-row">
+          <h2>Optimizer analysis</h2>
+        </div>
+        <p className="optimizer-panel-lead">
+          Run a sweep first to populate optimizer training data. This tab will then show model fit, recommendations, verification,
+          and exports.
+        </p>
+        <div className="sweep-placeholder-card">
+          <h3>Waiting for sweep bundle</h3>
+          <p className="helper-text">
+            Use the Sweep tab to run either fast or report analysis. Once a sweep completes, return here and run the optimizer.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const summariesRanked = useMemo(() => {
     return [...sweepResult.summaries].sort((a, b) => b.meanBleEfficiency - a.meanBleEfficiency);
   }, [sweepResult.summaries]);
@@ -219,6 +243,28 @@ export function OptimizerPanel({
     return roles.sort().join(", ");
   }, [verificationResults]);
 
+  const verificationAgreement = useMemo(() => {
+    if (!verificationResults?.length) {
+      return null;
+    }
+    const maxEnergyError = Math.max(...verificationResults.map((v) => Math.abs(v.energyPredictionError)));
+    const maxEnergyRelativeError = Math.max(...verificationResults.map((v) => Math.abs(v.energyRelativeError)));
+    const maxCaptureError = Math.max(...verificationResults.map((v) => Math.abs(v.capturePredictionError)));
+    return {
+      maxEnergyError,
+      maxEnergyRelativeError,
+      maxCaptureError,
+      needsWarning: maxEnergyError > 0.5 || maxCaptureError > 0.15
+    };
+  }, [verificationResults]);
+
+  const verifiedByRole = useMemo(() => {
+    if (!verificationResults?.length) {
+      return new Map<string, VerifiedCandidateResult>();
+    }
+    return new Map(verificationResults.map((v) => [v.recommendationRole, v]));
+  }, [verificationResults]);
+
   const bounds = defaultOptimizerBounds();
   const hasPipeline = Boolean(pipeline);
 
@@ -259,11 +305,48 @@ export function OptimizerPanel({
                 <td>{pipeline.model.energyR2.toFixed(6)}</td>
               </tr>
               <tr>
+                <th scope="row">Energy target</th>
+                <td>{pipeline.model.energyTarget}</td>
+              </tr>
+              <tr>
+                <th scope="row">LOO energy MAE</th>
+                <td>{pipeline.calibrationDiagnostics.energyMae.toFixed(4)} mAh/day</td>
+              </tr>
+              <tr>
+                <th scope="row">Generated bounds</th>
+                <td>{pipeline.constrainCandidatesToTrainingEnvelope ? "Observed sweep envelope" : "Configured optimizer bounds"}</td>
+              </tr>
+              <tr>
                 <th scope="row">Ridge λ</th>
                 <td>{pipeline.model.ridgeLambda}</td>
               </tr>
             </tbody>
           </table>
+          <p className="helper-text optimizer-diagnostics-line">
+            Sweep mode: <strong>{sweepResult.mode}</strong>. Sweep seeds:{" "}
+            <strong>{sweepResult.seedsUsed.length > 0 ? sweepResult.seedsUsed.join(", ") : "none"}</strong>. Verification protocol:{" "}
+            <strong>{verificationMode === "builtSeedSingle" ? "built seed only" : "mean over sweep seeds"}</strong>. Verification
+            seeds: <strong>{verificationSeeds.join(", ")}</strong>.
+          </p>
+          <p className="helper-text optimizer-diagnostics-line">
+            Leave-one-out calibration: capture RMSE{" "}
+            <strong>{pipeline.calibrationDiagnostics.captureRmse.toFixed(4)}</strong>; energy RMSE{" "}
+            <strong>{pipeline.calibrationDiagnostics.energyRmse.toFixed(4)} mAh/day</strong>. Candidate generation is{" "}
+            <strong>{pipeline.constrainCandidatesToTrainingEnvelope ? "constrained" : "not constrained"}</strong> to the adaptive
+            sweep training envelope.
+          </p>
+        </div>
+      ) : null}
+
+      {verificationAgreement?.needsWarning ? (
+        <div className="optimizer-verification-warning">
+          <h3>Verification overrides predictions</h3>
+          <p className="helper-text">
+            At least one recommended policy is outside the sanity band after simulation. Largest absolute energy miss:{" "}
+            <strong>{verificationAgreement.maxEnergyError.toFixed(4)} mAh/day</strong> (
+            {(verificationAgreement.maxEnergyRelativeError * 100).toFixed(1)}% relative to prediction). Use verified values for
+            decisions from this run.
+          </p>
         </div>
       ) : null}
 
@@ -308,6 +391,12 @@ export function OptimizerPanel({
       {pipeline ? (
         <div className="optimizer-rec-section">
           <h3>Recommendations</h3>
+          {verificationResults?.length ? (
+            <p className="helper-text">
+              Verification has run for these roles. Treat the verified capture, energy, and efficiency columns as the decision values
+              for this seed protocol; predicted values remain as surrogate context.
+            </p>
+          ) : null}
           <div className="table-wrap">
             <table className="optimizer-rec-table">
               <thead>
@@ -322,16 +411,21 @@ export function OptimizerPanel({
                   <th>pw</th>
                   <th>τ peer</th>
                   <th>Pred capture</th>
+                  <th>Ver capture</th>
                   <th>Pred mAh/d</th>
+                  <th>Ver mAh/d</th>
                   <th>Pred eff.</th>
+                  <th>Ver eff.</th>
                   <th>Rel cap</th>
                   <th>Rel E</th>
+                  <th>Coverage</th>
                   <th>Pareto</th>
                 </tr>
               </thead>
               <tbody>
                 {pipeline.recommendations.picks.map((p) => {
                   const c = p.candidate;
+                  const verified = verifiedByRole.get(p.label);
                   const policySummary = c ? sweepSummaryForOptimizerCandidate(sweepResult, c) : null;
                   const canSimulate = Boolean(
                     c && onSimulateRecommendation && policySummary && firmwarePolicyFromSweepSummary(policySummary)
@@ -366,10 +460,18 @@ export function OptimizerPanel({
                       <td>{c ? c.peerWeight.toFixed(4) : "—"}</td>
                       <td>{c ? Math.round(c.tauPeerSeconds) : "—"}</td>
                       <td>{c ? c.predictedCaptureRate.toFixed(4) : "—"}</td>
+                      <td>{verified ? verified.verifiedCaptureRate.toFixed(4) : "—"}</td>
                       <td>{c ? c.predictedMahPerDay.toFixed(4) : "—"}</td>
+                      <td>{verified ? verified.verifiedMahPerDay.toFixed(4) : "—"}</td>
                       <td>{c ? c.predictedBleEfficiency.toFixed(4) : "—"}</td>
+                      <td>{verified ? verified.verifiedBleEfficiency.toFixed(4) : "—"}</td>
                       <td>{c ? c.predictedRelativeCapture.toFixed(4) : "—"}</td>
                       <td>{c ? c.predictedRelativeEnergy.toFixed(4) : "—"}</td>
+                      <td>
+                        {c?.source === "predicted_adaptive"
+                          ? `${c.trainingOutsideEnvelope ? "Outside" : "Inside"} / d=${c.trainingNearestDistance?.toFixed(2) ?? "—"}`
+                          : "Observed"}
+                      </td>
                       <td>{c ? (c.isPredictedPareto ? "Yes" : "No") : "—"}</td>
                     </tr>
                   );
@@ -395,9 +497,12 @@ export function OptimizerPanel({
                   <th>Pred mAh/d</th>
                   <th>Ver mAh/d</th>
                   <th>Δ mAh/d</th>
+                  <th>Δ mAh/d %</th>
                   <th>Pred eff.</th>
                   <th>Ver eff.</th>
                   <th>Δ eff.</th>
+                  <th>Seeds</th>
+                  <th>Coverage</th>
                 </tr>
               </thead>
               <tbody>
@@ -411,9 +516,16 @@ export function OptimizerPanel({
                     <td>{v.predictedMahPerDay.toFixed(4)}</td>
                     <td>{v.verifiedMahPerDay.toFixed(4)}</td>
                     <td>{v.energyPredictionError.toFixed(4)}</td>
+                    <td>{(v.energyRelativeError * 100).toFixed(1)}%</td>
                     <td>{v.predictedBleEfficiency.toFixed(4)}</td>
                     <td>{v.verifiedBleEfficiency.toFixed(4)}</td>
                     <td>{v.efficiencyPredictionError.toFixed(4)}</td>
+                    <td>{v.verificationSeeds.join(", ")}</td>
+                    <td>
+                      {v.source === "predicted_adaptive"
+                        ? `${v.trainingOutsideEnvelope ? "Outside" : "Inside"} / d=${v.trainingNearestDistance?.toFixed(2) ?? "—"}`
+                        : "Observed"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -491,6 +603,9 @@ export function OptimizerPanel({
                 bounds,
                 candidateCount: candidatePreset,
                 optimizerSeed,
+                verificationMode,
+                verificationSeeds,
+                builtSeed: String(baseConfig.seed),
                 verification: verificationResults ?? undefined
               }),
               "text/markdown;charset=utf-8"

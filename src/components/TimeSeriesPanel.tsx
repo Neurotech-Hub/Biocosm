@@ -252,7 +252,7 @@ export function TimeSeriesPanel({
 
         {activePolicyType === "motion_peer_adaptive" && adaptiveBleSeries.length > 0 ? (
           <div className="time-series-chart-card">
-            <h3 className="chart-subtitle chart-card-title">Adaptive BLE policy (cohort mean)</h3>
+            <h3 className="chart-subtitle chart-card-title">Adaptive BLE: cohort mean drive and scan interval (full run)</h3>
             <svg
               className="time-series-chart ble-policy-chart"
               viewBox={`0 0 ${chartWidth} ${bleChartHeight}`}

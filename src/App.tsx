@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { AssumptionsPanel } from "./components/AssumptionsPanel";
-import { AdaptivePolicyMiniPanel } from "./components/AdaptivePolicyMiniPanel";
 import { CanvasVisualizer } from "./components/CanvasVisualizer";
 import { ControlsPanel } from "./components/ControlsPanel";
 import { LegendPanel } from "./components/LegendPanel";
@@ -70,6 +69,9 @@ export function App() {
   const [optimizerSeedState, setOptimizerSeedState] = useState("optimizer-001");
   const [optimizerRidgeLambdaStr, setOptimizerRidgeLambdaStr] = useState("0.0001");
   const [optimizerAdvancedOpen, setOptimizerAdvancedOpen] = useState(false);
+  const [optimizerVerificationMode, setOptimizerVerificationMode] = useState<"builtSeedSingle" | "sweepSeedsMean">(
+    "builtSeedSingle"
+  );
   const timeline = build.timeline;
   const simulation = timeline[currentStep] ?? timeline[0];
   const totalSteps = Math.max(0, timeline.length - 1);
@@ -91,12 +93,6 @@ export function App() {
 
     return () => window.clearInterval(interval);
   }, [isPlaying, totalSteps]);
-
-  useEffect(() => {
-    if (!sweepResult && workspaceTab === "optimizer") {
-      setWorkspaceTab("sweep");
-    }
-  }, [sweepResult, workspaceTab]);
 
   useEffect(() => {
     setOptimizerVerification(null);
@@ -162,6 +158,10 @@ export function App() {
     if (!sweepResult) {
       return;
     }
+    const verificationSeeds =
+      optimizerVerificationMode === "sweepSeedsMean" && sweepResult.seedsUsed.length > 0
+        ? [...sweepResult.seedsUsed]
+        : [String(builtConfig.seed)];
     const items = pipeline.recommendations.picks
       .filter((p) => p.candidate != null)
       .map((p) => ({
@@ -176,6 +176,9 @@ export function App() {
     setOptimizerVerifyProgress({ completed: 0, total: items.length });
     try {
       const results = await verifyOptimizerCandidates(items, builtConfig, {
+        verificationSeeds,
+        verificationSeedMode: optimizerVerificationMode,
+        baselineSummary: sweepResult.baselineSummary,
         onProgress: (completed, total) => setOptimizerVerifyProgress({ completed, total })
       });
       setOptimizerVerification(results);
@@ -201,7 +204,8 @@ export function App() {
         candidateCount: optimizerCandidatePreset,
         optimizerSeed: optimizerSeedState,
         bounds: defaultOptimizerBounds(),
-        ridgeLambda
+        ridgeLambda,
+        constrainCandidatesToTrainingEnvelope: true
       });
       setOptimizerPipeline(result);
       setOptimizerWorkflowPhase("verifying");
@@ -276,20 +280,9 @@ export function App() {
             </button>
             <button
               type="button"
-              className={`app-topnav-tab ${workspaceTab === "optimizer" ? "app-topnav-tab-active" : ""} ${!sweepResult ? "app-topnav-tab-disabled" : ""}`}
+              className={`app-topnav-tab ${workspaceTab === "optimizer" ? "app-topnav-tab-active" : ""}`}
               aria-current={workspaceTab === "optimizer" ? "page" : undefined}
-              aria-disabled={!sweepResult}
-              disabled={!sweepResult}
-              title={
-                sweepResult
-                  ? undefined
-                  : "Run a sweep on the Sweep tab and wait for it to finish to use the Optimizer."
-              }
-              onClick={() => {
-                if (sweepResult) {
-                  setWorkspaceTab("optimizer");
-                }
-              }}
+              onClick={() => setWorkspaceTab("optimizer")}
             >
               Optimizer
             </button>
@@ -378,9 +371,7 @@ export function App() {
             onBuildSimulation={() => runBuildSimulation(draftConfig)}
             onShowTrueProximityChange={setShowTrueProximity}
             onShowObservedDetectionsChange={setShowObservedDetections}
-            onOpenSweepReport={() => setWorkspaceTab("sweep")}
           />
-          <AdaptivePolicyMiniPanel state={simulation} timeline={timeline} />
         </div>
       </section>
       ) : workspaceTab === "sweep" ? (
@@ -408,7 +399,6 @@ export function App() {
         </div>
       </section>
       ) : (
-      sweepResult && (
       <section className="workspace workspace-sweep-layout">
         <div className="visual-column">
           <OptimizerPanel
@@ -422,6 +412,12 @@ export function App() {
             verificationProgress={optimizerVerifyProgress}
             simulateDisabled={buildProgress.isBuilding || sweepRunning}
             onSimulateRecommendation={simulateOptimizerRecommendation}
+            verificationMode={optimizerVerificationMode}
+            verificationSeeds={
+              optimizerVerificationMode === "sweepSeedsMean" && sweepResult?.seedsUsed.length
+                ? sweepResult.seedsUsed
+                : [String(builtConfig.seed)]
+            }
           />
         </div>
         <div className="sidebar-column">
@@ -440,11 +436,19 @@ export function App() {
             verificationRunning={optimizerVerifyRunning}
             verificationProgress={optimizerVerifyProgress}
             verificationDisabled={buildProgress.isBuilding || sweepRunning}
+            verificationMode={optimizerVerificationMode}
+            onVerificationModeChange={setOptimizerVerificationMode}
             baseSeedLabel={String(builtConfig.seed)}
+            sweepSeedsUsed={sweepResult?.seedsUsed ?? []}
+            hasSweepBundle={Boolean(sweepResult)}
             onRunOptimizer={runOptimizer}
             onRetryVerification={retryOptimizerVerification}
             extraStatus={
-              isBuildDirty ? (
+              !sweepResult ? (
+                <p className="helper-text warning-text">
+                  Run a sweep first to create optimizer training rows.
+                </p>
+              ) : isBuildDirty ? (
                 <p className="helper-text warning-text">
                   Simulation controls changed after the last build — rebuild on the Simulator tab if you want verification to
                   match edited assumptions.
@@ -454,7 +458,6 @@ export function App() {
           />
         </div>
       </section>
-      )
       )}
     </main>
   );
