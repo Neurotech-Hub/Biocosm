@@ -1,3 +1,4 @@
+import { milliampHoursFromMeanMicroAmps } from "./config";
 import { pairKey } from "./geometry";
 import type {
   DetectionEvent,
@@ -6,6 +7,21 @@ import type {
   SimulationMetrics,
   SimulationState
 } from "./types";
+
+/** Pack lifetime at constant mean draw: capacity / (mAh per day from µA). */
+export function deviceLifetimeDaysFromMeanMicroAmps(
+  batteryCapacityMah: number,
+  meanMicroAmps: number
+): number | null {
+  if (batteryCapacityMah <= 0 || meanMicroAmps <= 0) {
+    return null;
+  }
+  const mahPerDay = milliampHoursFromMeanMicroAmps(meanMicroAmps, 24);
+  if (mahPerDay <= 0) {
+    return null;
+  }
+  return batteryCapacityMah / mahPerDay;
+}
 
 function isJuxtaMaincSocialFixedPolicy(policy: SimulationState["config"]["activePolicy"]): boolean {
   if (policy.type !== "fixed") {

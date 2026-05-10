@@ -108,6 +108,29 @@ export function App() {
     sweepAbortRef.current?.abort();
   };
 
+  const runBuildSimulation = (configToBuild: SimulationConfig) => {
+    if (buildProgress.isBuilding) {
+      return;
+    }
+    setIsPlaying(false);
+    setCurrentStep(0);
+    setBuildProgress({ isBuilding: true, percent: 0 });
+
+    window.setTimeout(() => {
+      createTimelineAsync(
+        createInitialSimulation(configToBuild),
+        (percent) => setBuildProgress({ isBuilding: true, percent }),
+        (nextBuild) => {
+          setBuiltConfig(configToBuild);
+          setBuild(nextBuild);
+          setCurrentStep(0);
+          setIsBuildDirty(false);
+          setBuildProgress({ isBuilding: false, percent: 100 });
+        }
+      );
+    }, 0);
+  };
+
   const simulateSweepPolicy = (summary: SweepPolicySummary) => {
     if (!summary.params || buildProgress.isBuilding) {
       return;
@@ -118,11 +141,10 @@ export function App() {
       summary.params.peerWeight,
       summary.params.tauPeerSeconds
     );
-    setDraftConfig({ ...builtConfig, activePolicy: policy });
-    setIsBuildDirty(true);
-    setIsPlaying(false);
-    setCurrentStep(0);
+    const nextConfig = { ...builtConfig, activePolicy: policy };
+    setDraftConfig(nextConfig);
     setWorkspaceTab("simulator");
+    runBuildSimulation(nextConfig);
   };
 
   const navStatusLabel = buildProgress.isBuilding
@@ -214,7 +236,11 @@ export function App() {
             animalIds={build.animalIdsStripOrder}
             startTimeSeconds={builtConfig.startTimeSeconds}
           />
-          <MetricsPanel metrics={build.metrics} animalCount={builtConfig.animalCount} />
+          <MetricsPanel
+            metrics={build.metrics}
+            animalCount={builtConfig.animalCount}
+            batteryCapacityMah={builtConfig.energy.batteryCapacityMah}
+          />
           <RawDataPanel logs={build.logs} config={builtConfig} metrics={build.metrics} timeline={build.timeline} />
           <AssumptionsPanel config={builtConfig} />
         </div>
@@ -235,29 +261,7 @@ export function App() {
               setIsBuildDirty(true);
               setIsPlaying(false);
             }}
-            onBuildSimulation={() => {
-              if (buildProgress.isBuilding) {
-                return;
-              }
-
-              setIsPlaying(false);
-              setBuildProgress({ isBuilding: true, percent: 0 });
-              const configToBuild = draftConfig;
-
-              window.setTimeout(() => {
-                createTimelineAsync(
-                  createInitialSimulation(configToBuild),
-                  (percent) => setBuildProgress({ isBuilding: true, percent }),
-                  (nextBuild) => {
-                    setBuiltConfig(configToBuild);
-                    setBuild(nextBuild);
-                    setCurrentStep(0);
-                    setIsBuildDirty(false);
-                    setBuildProgress({ isBuilding: false, percent: 100 });
-                  }
-                );
-              }, 0);
-            }}
+            onBuildSimulation={() => runBuildSimulation(draftConfig)}
             onShowTrueProximityChange={setShowTrueProximity}
             onShowObservedDetectionsChange={setShowObservedDetections}
             onOpenSweepReport={() => setWorkspaceTab("sweep")}

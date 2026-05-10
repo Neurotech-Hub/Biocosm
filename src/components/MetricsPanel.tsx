@@ -1,14 +1,20 @@
 import type { ReactNode } from "react";
+import { deviceLifetimeDaysFromMeanMicroAmps } from "../simulation/analysis";
 import type { SimulationMetrics } from "../simulation/types";
 import { InfoPopover } from "./InfoPopover";
 
 type MetricsPanelProps = {
   metrics: SimulationMetrics;
   animalCount: number;
+  batteryCapacityMah: number;
 };
 
-export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
+export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: MetricsPanelProps) {
   const scanEffort = animalCount > 0 ? metrics.scanWindows / animalCount : 0;
+  const deviceLifetimeDays = deviceLifetimeDaysFromMeanMicroAmps(
+    batteryCapacityMah,
+    metrics.meanEnergyCurrentMicroAmpsPerCollar
+  );
 
   return (
     <section className="panel metrics-panel">
@@ -28,7 +34,10 @@ export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
             <dt>Scan windows</dt>
             <dd>Firmware-style scan windows scheduled across the whole run. Negative windows are scans that found no peer.</dd>
             <dt>Energy and battery</dt>
-            <dd>Representative-collar estimates, not fleet totals. Capture/mAh is BLE capture hits per mAh used.</dd>
+            <dd>
+              Representative-collar estimates, not fleet totals. Capture/mAh is BLE capture hits per mAh used. Device
+              lifetime assumes constant mean draw over 24 h and full usable pack capacity.
+            </dd>
           </dl>
         </InfoPopover>
       </div>
@@ -69,6 +78,10 @@ export function MetricsPanel({ metrics, animalCount }: MetricsPanelProps) {
           <Metric label="Battery remaining" value={`${Math.round(metrics.batteryRemainingPercent * 100)}%`} />
           <Metric label="Estimated voltage" value={`${metrics.estimatedVoltage.toFixed(2)} V`} />
           <Metric label="Mean current draw" value={`${metrics.meanEnergyCurrentMicroAmpsPerCollar.toFixed(0)} µA`} />
+          <Metric
+            label="Device lifetime"
+            value={deviceLifetimeDays != null ? `${deviceLifetimeDays.toFixed(1)} days` : "—"}
+          />
         </MetricSection>
       </div>
       {metrics.energyModelWarning ? <p className="helper-text">{metrics.energyModelWarning}</p> : null}
