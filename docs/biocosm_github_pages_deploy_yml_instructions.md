@@ -125,12 +125,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -139,17 +139,17 @@ jobs:
       - name: Build app
         run: npm run build
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
       - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: ./dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -157,7 +157,7 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 ```
 
 If `npm ci` fails because there is no lockfile, change the install step to:
@@ -166,6 +166,8 @@ If `npm ci` fails because there is no lockfile, change the install step to:
       - name: Install dependencies
         run: npm install
 ```
+
+**Note:** This workflow omits `actions/configure-pages`. That action calls the REST API to load the Pages site and returns **404 Not Found** until **Settings → Pages → Source** has been set to **GitHub Actions** at least once, which used to fail the entire **build** job before any artifact was uploaded. For a static Vite `dist/`, only `upload-pages-artifact` and `deploy-pages` are required.
 
 ---
 
@@ -351,6 +353,7 @@ from the wrong root path.
 | Blank white page | Missing or wrong Vite `base` | Use `base: '/Biocosm/'` |
 | CSS/JS 404s | Asset paths built for root domain | Rebuild after setting Vite `base` |
 | Workflow fails at `npm ci` | Missing or stale lockfile | Use `npm install` or commit updated lockfile |
+| Build fails: `Get Pages site failed` / `configure-pages` Not Found | Pages never enabled for repo | Set **Settings → Pages → Source → GitHub Actions** first, or use a workflow without `configure-pages` (as in this repo) |
 | GitHub Pages says not configured | Pages source not set | Settings → Pages → Source → GitHub Actions |
 | Refresh on a route 404s | GitHub Pages static hosting + SPA routing | Add optional `public/404.html` fallback |
 | Env var undefined | Missing `VITE_` prefix or workflow env | Add `VITE_` var and pass it during build |

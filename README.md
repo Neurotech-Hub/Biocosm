@@ -65,7 +65,7 @@ The **Deploy to GitHub Pages** workflow lives at [.github/workflows/deploy.yml](
 ### Manual setup (repository owner, once per repo)
 
 1. In GitHub: **Settings → Pages → Build and deployment**.
-2. Set **Source** to **GitHub Actions** (not “Deploy from a branch”). Until this is set, the workflow may succeed but the site will not publish.
+2. Set **Source** to **GitHub Actions** (not “Deploy from a branch”). This creates the Pages site record; without it, the **deploy** job can fail even when **build** finishes. The workflow does not use `actions/configure-pages`, which previously failed the build with `Get Pages site failed … Not Found` until this step was done.
 
 ### After you push
 
