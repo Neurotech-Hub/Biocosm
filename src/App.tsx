@@ -33,6 +33,7 @@ import {
   type TimeSeriesPoint
 } from "./simulation/timeSeries";
 import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationState } from "./simulation/types";
+import { APP_RELEASE_VERSION } from "./appReleaseVersion";
 import { PLAYBACK_SPEED_MULTIPLIER } from "./playbackConstants";
 import { createInitialSimulation } from "./simulation/world";
 import {
@@ -535,6 +536,13 @@ export function App() {
           onCancel={cancelWorkspaceLoad}
         />
       ) : null}
+
+      <footer className="app-footer" role="contentinfo">
+        <span className="app-footer-label">Biocosm simulator</span>
+        <span className="app-footer-version" title="Bump src/appReleaseVersion.ts on major releases">
+          v{APP_RELEASE_VERSION}
+        </span>
+      </footer>
     </main>
   );
 }

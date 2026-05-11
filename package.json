@@ -1,6 +1,6 @@
 {
   "name": "biocosm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Browser-based adaptive social proximity logger simulator.",
   "type": "module",
   "scripts": {
