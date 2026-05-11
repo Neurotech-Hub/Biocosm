@@ -159,7 +159,7 @@ export type BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: number;
 };
 
-export type EnergyModel = "component" | "empiricalAverage";
+export type EnergyModel = "component";
 
 export type EnergyConfig = {
   batteryCapacityMah: number;
@@ -176,8 +176,8 @@ export type EnergyConfig = {
   advEventChargeMicroCoulombs: number;
   energyModel: EnergyModel;
   /**
-   * Bench / datasheet total average current for Juxta social mode (5 s adv / 20 s scan), µA.
-   * Used for empiricalAverage model and >3× warnings vs component estimates.
+   * Reference bench total average current for 5 s advertise / 20 s scan style duty, µA.
+   * Used for >3× component-model warnings vs this reference.
    */
   measuredSocial5s20sTotalMicroAmps: number;
   /**
@@ -248,7 +248,7 @@ export type SimulationConfig = {
   advancedSpeciesOverrides?: AdvancedSpeciesOverrides;
   /** Catalog id for comparison BLE baseline schedules (`general-discovery`, `symmetric-example`, `juxta-v56-social`, or `custom`). */
   blePolicyPresetId: string;
-  /** Hardware energy profile id (`juxta-v56`, `generic-nrf52840`). */
+  /** Hardware energy profile id (only `generic-nrf52840`; legacy `juxta-v56` normalizes on load). */
   hardwareEnergyProfileId: string;
   startTimeSeconds: number;
   simulationLengthSeconds: number;

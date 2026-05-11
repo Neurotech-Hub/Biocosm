@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultSimulationConfig } from "../simulation/config";
+import { DEFAULT_HARDWARE_ENERGY_PROFILE_ID } from "../simulation/hardwareEnergyProfiles";
 import {
   buildWorkspaceFile,
   parseWorkspaceFileText,
@@ -60,6 +61,25 @@ describe("workspaceFile", () => {
 
   it("rejects invalid JSON", () => {
     expect(parseWorkspaceFileText("{").ok).toBe(false);
+  });
+
+  it("migrates legacy juxta-v56 hardware energy profile id to the generic profile", () => {
+    const f = buildWorkspaceFile({
+      config: { ...defaultSimulationConfig, seed: "hw-mig", hardwareEnergyProfileId: "juxta-v56" },
+      view: { showTrueProximity: true, showObservedDetections: true },
+      sweepMode: "fast",
+      sweepGridVariant: "quick",
+      reportSeedCount: 3,
+      shouldRunSweep: false,
+      workspaceTab: "simulator"
+    });
+    const parsed = parseWorkspaceFileText(serializeWorkspaceFile(f));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.data.config.hardwareEnergyProfileId).toBe(DEFAULT_HARDWARE_ENERGY_PROFILE_ID);
+    expect(parsed.data.config.energy.energyModel).toBe("component");
   });
 
   it("parses minimal v2 when sweep section uses defaults for missing fields", () => {

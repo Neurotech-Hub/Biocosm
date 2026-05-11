@@ -6,13 +6,13 @@ import { mapAdaptiveTiming } from "./policies/adaptive";
 import { buildSweepTrials } from "./sweep/adaptiveBleSweep";
 
 describe("BLE baseline vs hardware energy separation", () => {
-  it("changing hardware profile updates energy fields without altering active BLE schedule", () => {
+  it("applyHardwareProfileToEnergy refreshes pack energy without altering active BLE schedule", () => {
     const cfg = structuredClone(defaultSimulationConfig);
     const policySnap = JSON.stringify(cfg.activePolicy);
-    cfg.hardwareEnergyProfileId = "generic-nrf52840";
+    cfg.energy.baselineCurrentMicroAmps = 999;
     applyHardwareProfileToEnergy(cfg);
     expect(JSON.stringify(cfg.activePolicy)).toBe(policySnap);
-    expect(cfg.energy.baselineCurrentMicroAmps).toBe(0);
+    expect(cfg.energy.baselineCurrentMicroAmps).toBe(10);
   });
 
   it("neutral adaptive timing uses general-discovery anchors from default config", () => {

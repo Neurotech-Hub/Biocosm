@@ -6,8 +6,18 @@ import {
 } from "./config";
 import { computeEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
 import { runSimulation } from "./engine";
-import type { BleBurstEvent } from "./types";
+import type { BleBurstEvent, EnergyConfig } from "./types";
 import { createInitialSimulation } from "./world";
+
+/** Energy tuned to reproduce ~233 µA long-run Juxta social-mode calibration in integration tests below. */
+function energyForJuxtaSocialDatasheetCheck(base: EnergyConfig): EnergyConfig {
+  return {
+    ...base,
+    baselineCurrentMicroAmps: 78,
+    componentBleActivityScale: 1.134,
+    measuredSocial5s20sTotalMicroAmps: 233.09
+  };
+}
 
 describe("energy model", () => {
   it("converts advertising µC to mAh via µC / 3_600_000", () => {
@@ -56,7 +66,8 @@ describe("energy model", () => {
       animalCount: 1,
       startTimeSeconds: 0,
       timeStepSeconds: 60,
-      activePolicy: { ...juxtaMainCMode0FixedPolicy }
+      activePolicy: { ...juxtaMainCMode0FixedPolicy },
+      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
     };
     const steps = (24 * 3600) / config.timeStepSeconds;
     const final = runSimulation(createInitialSimulation(config), steps);
@@ -71,7 +82,8 @@ describe("energy model", () => {
       seed: "energy-day",
       startTimeSeconds: 0,
       timeStepSeconds: 60,
-      activePolicy: { ...juxtaMainCMode0FixedPolicy }
+      activePolicy: { ...juxtaMainCMode0FixedPolicy },
+      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
     };
     const steps = (24 * 3600) / base.timeStepSeconds;
     const one = runSimulation(createInitialSimulation({ ...base, animalCount: 1 }), steps).energy.cumulativeMah;
@@ -86,7 +98,8 @@ describe("energy model", () => {
       seed: "dt-energy",
       animalCount: 1,
       startTimeSeconds: 0,
-      activePolicy: { ...juxtaMainCMode0FixedPolicy }
+      activePolicy: { ...juxtaMainCMode0FixedPolicy },
+      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
     };
     const dts = [30, 60] as const;
     const projected: number[] = [];

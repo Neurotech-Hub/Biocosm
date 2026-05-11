@@ -4,17 +4,10 @@ import {
   DEFAULT_BLE_POLICY_PRESET_ID,
   fixedPolicyFromPreset
 } from "./blePolicyPresets";
-import {
-  DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
-  energyConfigFromHardwareProfileId,
-  juxtaV56EnergyPreset
-} from "./hardwareEnergyProfiles";
+import { DEFAULT_HARDWARE_ENERGY_PROFILE_ID, energyConfigFromHardwareProfileId } from "./hardwareEnergyProfiles";
 import { DEFAULT_SPECIES_PRESET_ID } from "./speciesPresets";
 import { defaultSpeciesModifiers } from "./speciesModifiers";
 import type { BleSchedulingConfig, FixedPolicyConfig, SimulationConfig } from "./types";
-
-/** Re-export for docs and callers that imported from config. */
-export { juxtaV56EnergyPreset };
 
 export const defaultBleScheduling: BleSchedulingConfig = {
   interBurstDelaySeconds: 0.1,

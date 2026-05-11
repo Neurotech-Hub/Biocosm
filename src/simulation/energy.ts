@@ -25,21 +25,12 @@ export function computeEnergyLog(
   /** One representative collar — see `energyBurstsForRepresentativeCollar` in engine. */
   const steadyMah = microAmpSecondsToMilliampHours(config.baselineCurrentMicroAmps, epochSeconds);
 
-  let scanMah: number;
-  let advertisingMah: number;
-
-  if (config.energyModel === "empiricalAverage") {
-    const totalFromBenchMah = microAmpSecondsToMilliampHours(config.measuredSocial5s20sTotalMicroAmps, epochSeconds);
-    advertisingMah = Math.max(0, totalFromBenchMah - steadyMah);
-    scanMah = 0;
-  } else {
-    const bleScale = config.componentBleActivityScale ?? 1;
-    const listenSeconds = totalScanListenWindowSeconds(bursts);
-    scanMah = ((listenSeconds * config.rxCurrentMa1MPhy) / 3600) * bleScale;
-    const advPackets = countAdvertisingPacketsInBursts(bursts, interval);
-    advertisingMah =
-      ((advPackets * config.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) * bleScale;
-  }
+  const bleScale = config.componentBleActivityScale ?? 1;
+  const listenSeconds = totalScanListenWindowSeconds(bursts);
+  const scanMah = ((listenSeconds * config.rxCurrentMa1MPhy) / 3600) * bleScale;
+  const advPackets = countAdvertisingPacketsInBursts(bursts, interval);
+  const advertisingMah =
+    ((advPackets * config.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) * bleScale;
 
   const totalMah = steadyMah + scanMah + advertisingMah;
   const cumulativeMah = previousCumulativeMah + totalMah;

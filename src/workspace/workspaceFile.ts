@@ -1,5 +1,10 @@
 import { normalizeBlePolicyPresetId } from "../simulation/blePolicyPresets";
 import { defaultSimulationConfig } from "../simulation/config";
+import {
+  DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
+  hardwareEnergyProfiles,
+  normalizeHardwareEnergyProfileId
+} from "../simulation/hardwareEnergyProfiles";
 import { defaultSweepGridVariant, type SweepGridVariant } from "../simulation/sweep/adaptiveBleSweep";
 import type { SimulationConfig } from "../simulation/types";
 
@@ -73,7 +78,7 @@ function mergeSimulationConfig(partial: unknown): SimulationConfig {
     merged.radio = { ...base.radio, ...(p.radio as SimulationConfig["radio"]) };
   }
   if (isPlainObject(p.energy)) {
-    merged.energy = { ...base.energy, ...(p.energy as SimulationConfig["energy"]) };
+    merged.energy = { ...base.energy, ...(p.energy as SimulationConfig["energy"]), energyModel: "component" };
   }
   if (isPlainObject(p.bleScheduling)) {
     merged.bleScheduling = { ...base.bleScheduling, ...(p.bleScheduling as SimulationConfig["bleScheduling"]) };
@@ -88,6 +93,9 @@ function mergeSimulationConfig(partial: unknown): SimulationConfig {
     merged.advancedSpeciesOverrides = p.advancedSpeciesOverrides as SimulationConfig["advancedSpeciesOverrides"];
   }
   merged.blePolicyPresetId = normalizeBlePolicyPresetId(merged.blePolicyPresetId);
+  const hwNorm = normalizeHardwareEnergyProfileId(String(merged.hardwareEnergyProfileId));
+  merged.hardwareEnergyProfileId = hardwareEnergyProfiles[hwNorm] ? hwNorm : DEFAULT_HARDWARE_ENERGY_PROFILE_ID;
+  merged.energy.energyModel = "component";
   return merged;
 }
 

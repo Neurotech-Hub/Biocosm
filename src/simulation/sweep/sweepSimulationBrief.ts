@@ -40,10 +40,7 @@ export function buildSweepSimulationBrief(
       : enc.mode;
 
   const behavior = config.behavior;
-  const energyLabel =
-    config.energy.energyModel === "component"
-      ? "Component (timing + events)"
-      : "Empirical average";
+  const energyLabel = "Component (timing + events)";
 
   const baselinePreset = bleBaselinePresetDefForSweep(config);
   const hw =

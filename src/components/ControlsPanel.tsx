@@ -10,7 +10,12 @@ import {
   normalizeBlePolicyPresetId
 } from "../simulation/blePolicyPresets";
 import { defaultAdaptivePolicy, generalDiscoveryFixedPolicy } from "../simulation/config";
-import { applyHardwareProfileToEnergy, hardwareEnergyProfiles } from "../simulation/hardwareEnergyProfiles";
+import {
+  applyHardwareProfileToEnergy,
+  DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
+  hardwareEnergyProfiles,
+  normalizeHardwareEnergyProfileId
+} from "../simulation/hardwareEnergyProfiles";
 import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
 import { SPECIES_PRESETS, speciesPresetOptions } from "../simulation/speciesPresets";
 import type { SpeciesModifierConfig, SpeciesPreset } from "../simulation/speciesTypes";
@@ -151,11 +156,24 @@ export function ControlsPanel({
     }
   }, [config.blePolicyPresetId]);
 
-  const applyHardwareProfileId = (hardwareEnergyProfileId: string) => {
-    const next = { ...config, hardwareEnergyProfileId };
-    applyHardwareProfileToEnergy(next);
+  useEffect(() => {
+    const norm = normalizeHardwareEnergyProfileId(config.hardwareEnergyProfileId);
+    const safeId = hardwareEnergyProfiles[norm] ? norm : DEFAULT_HARDWARE_ENERGY_PROFILE_ID;
+    const idChanged = safeId !== config.hardwareEnergyProfileId;
+    const modelBad = config.energy.energyModel !== "component";
+    if (!idChanged && !modelBad) {
+      return;
+    }
+    const next: SimulationConfig = {
+      ...config,
+      hardwareEnergyProfileId: safeId,
+      energy: { ...config.energy, energyModel: "component" }
+    };
+    if (idChanged) {
+      applyHardwareProfileToEnergy(next);
+    }
     onConfigChange(next);
-  };
+  }, [config.hardwareEnergyProfileId, config.energy.energyModel]);
 
   const syncFixedPolicyAndPreset = (fixed: FixedPolicyConfig) => {
     onConfigChange({
@@ -922,40 +940,15 @@ export function ControlsPanel({
         <h3>Energy / Battery</h3>
         <p className="helper-text">
           Component model: baseline µA plus scan (RX × listen-window seconds) and advertising (packet events × µC/event)
-          for <strong>one representative collar</strong>. Empirical mode uses the bench total for 5s/20s minus baseline
-          for that same collar.
+          for <strong>one representative collar</strong>.
         </p>
-        <label>
-          Hardware energy profile
-          <select
-            value={config.hardwareEnergyProfileId}
-            onChange={(event) => applyHardwareProfileId(event.target.value)}
-          >
-            {Object.values(hardwareEnergyProfiles).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p className="helper-text">
+          <strong>Hardware energy profile:</strong>{" "}
+          {hardwareEnergyProfiles[DEFAULT_HARDWARE_ENERGY_PROFILE_ID]?.label ?? "Generic nRF52840 BLE wearable"}
+        </p>
         <p className="helper-text">
           Maps radio activity to current and pack size. Independent from the BLE schedule / policy baseline above.
         </p>
-        <label>
-          Energy model
-          <select
-            value={config.energy.energyModel}
-            onChange={(event) =>
-              updateEnergyConfig(
-                "energyModel",
-                event.target.value as SimulationConfig["energy"]["energyModel"]
-              )
-            }
-          >
-            <option value="component">Component (µC/event + listen RX + baseline)</option>
-            <option value="empiricalAverage">Empirical average (total − baseline, Juxta 5s/20s ref)</option>
-          </select>
-        </label>
         <label>
           Assumed TX power (label / prior): {config.energy.txPowerDbm} dBm
           <input
@@ -1033,19 +1026,6 @@ export function ControlsPanel({
             step="0.5"
             value={config.energy.advEventChargeMicroCoulombs}
             onChange={(event) => updateEnergyConfig("advEventChargeMicroCoulombs", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Juxta 5s/20s bench total (empirical + warn): {config.energy.measuredSocial5s20sTotalMicroAmps.toFixed(1)} µA
-          <input
-            type="range"
-            min="120"
-            max="400"
-            step="1"
-            value={config.energy.measuredSocial5s20sTotalMicroAmps}
-            onChange={(event) =>
-              updateEnergyConfig("measuredSocial5s20sTotalMicroAmps", Number(event.target.value))
-            }
           />
         </label>
       </section>

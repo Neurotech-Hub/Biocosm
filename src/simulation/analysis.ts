@@ -40,9 +40,6 @@ function energyModelWarningFor(
   meanEnergyCurrentMicroAmpsPerCollar: number
 ): string | undefined {
   const { energy, activePolicy } = state.config;
-  if (energy.energyModel !== "component") {
-    return undefined;
-  }
   if (!isJuxtaMaincSocialFixedPolicy(activePolicy)) {
     return undefined;
   }
@@ -50,7 +47,7 @@ function energyModelWarningFor(
     return undefined;
   }
   if (meanEnergyCurrentMicroAmpsPerCollar > 3 * energy.measuredSocial5s20sTotalMicroAmps) {
-    return "Predicted draw is more than 3× the Juxta 5s/20s bench reference — check for burst-wall × TX-style double counting or a policy mismatch.";
+    return "Predicted draw is more than 3× the configured bench reference total — check for burst-wall × TX-style double counting or a policy mismatch.";
   }
   return undefined;
 }
