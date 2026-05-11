@@ -40,11 +40,14 @@ const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
 /** Default fixed policy: General discovery (asymmetric proximity baseline). */
 export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(generalDiscoveryPreset);
 
-/** Device / BLE panel defaults: periodic scan, frequent advertising, double intervals when motion-inactive. */
-export const defaultSimulatorFixedBlePolicy: FixedPolicyConfig = {
+/**
+ * Optional fixed row (e.g. after a sweep): faster scan/adv than catalog general-discovery, with inactive ×2.
+ * Not used as the app default — that schedule raises capture and energy vs `generalDiscoveryFixedPolicy`.
+ */
+export const sweepStyleFixedProximityDdPolicy: FixedPolicyConfig = {
   type: "fixed",
-  id: "sim-default-fixed-proximity",
-  name: "Default fixed proximity (simulator)",
+  id: "sweep-fixed-s5-a1.25-w0.5-dd",
+  name: "Fixed 5s scan / 0.5s win / 1.25s adv — inactive ×2",
   scanIntervalSeconds: 5,
   scanWindowSeconds: 0.5,
   advIntervalSeconds: 1.25,
@@ -121,7 +124,8 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  activePolicy: { ...defaultSimulatorFixedBlePolicy }
+  /** Matches `blePolicyPresetId` general-discovery (20s scan / 1.5s win / 5s adv); lower duty than sweep-style fixed rows. */
+  activePolicy: { ...generalDiscoveryFixedPolicy }
 };
 
 /** Datasheet Social Mode average draw (Adv 5 s / Scan 20 s), µA — use with `milliampHoursFromMeanMicroAmps`. */
