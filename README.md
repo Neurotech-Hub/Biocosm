@@ -56,6 +56,23 @@ npm run build
 
 Known local environment note: this repo uses Vite 5, `@vitejs/plugin-react` 4, and Vitest 1 because the machine used for Phase 1 was running Node 20.10. Newer Vite/Vitest releases may require a newer Node 20 patch or Node 22+.
 
+## GitHub Pages (Neurotech-Hub/Biocosm)
+
+Production builds use Vite `base: '/Biocosm/'` so assets resolve under the project Pages URL: [https://neurotech-hub.github.io/Biocosm/](https://neurotech-hub.github.io/Biocosm/). Local `npm run dev` still uses `/` as the base.
+
+The **Deploy to GitHub Pages** workflow lives at [.github/workflows/deploy.yml](.github/workflows/deploy.yml). It runs on pushes to `main` and on manual **workflow_dispatch**.
+
+### Manual setup (repository owner, once per repo)
+
+1. In GitHub: **Settings → Pages → Build and deployment**.
+2. Set **Source** to **GitHub Actions** (not “Deploy from a branch”). Until this is set, the workflow may succeed but the site will not publish.
+
+### After you push
+
+Open **Actions**, confirm the latest **Deploy to GitHub Pages** run is green, then load the site and check the browser network tab for missing `/Biocosm/assets/*` requests.
+
+Full step-by-step and troubleshooting: [docs/biocosm_github_pages_deploy_yml_instructions.md](docs/biocosm_github_pages_deploy_yml_instructions.md).
+
 ## Project Structure
 
 - `src/simulation/types.ts` contains spec-aligned simulation contracts.
