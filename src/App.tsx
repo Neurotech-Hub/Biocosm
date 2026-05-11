@@ -279,6 +279,16 @@ export function App() {
     setBuildProgress({ isBuilding: false, percent: 0 });
   };
 
+  /** Close load modal after sim rebuild when the file did not request a sweep (onComplete can be skipped if the build id races). */
+  useEffect(() => {
+    if (!workspaceLoadActive || workspaceLoadPendingSweep) {
+      return;
+    }
+    if (!buildProgress.isBuilding && buildProgress.percent >= 100) {
+      setWorkspaceLoadActive(false);
+    }
+  }, [workspaceLoadActive, workspaceLoadPendingSweep, buildProgress.isBuilding, buildProgress.percent]);
+
   const simulateSweepPolicy = (summary: SweepPolicySummary) => {
     if (!summary.params || buildProgress.isBuilding) {
       return;
