@@ -1,5 +1,16 @@
-import { useState } from "react";
-import { defaultAdaptivePolicy, juxtaMainCMode0FixedPolicy } from "../simulation/config";
+import { useEffect, useState } from "react";
+import {
+  bleBaselinePresetDefForSweep,
+  blePolicyPresetIdForFixedPolicy,
+  blePolicyPresets,
+  BLE_POLICY_CUSTOM_ID,
+  fixedPolicyFromPreset,
+  getBlePolicyPreset,
+  motionPeerAdaptiveWithBleBaselineAnchors,
+  normalizeBlePolicyPresetId
+} from "../simulation/blePolicyPresets";
+import { defaultAdaptivePolicy, generalDiscoveryFixedPolicy } from "../simulation/config";
+import { applyHardwareProfileToEnergy, hardwareEnergyProfiles } from "../simulation/hardwareEnergyProfiles";
 import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
 import { SPECIES_PRESETS, speciesPresetOptions } from "../simulation/speciesPresets";
 import type { SpeciesModifierConfig, SpeciesPreset } from "../simulation/speciesTypes";
@@ -110,6 +121,51 @@ export function ControlsPanel({
       activePolicy: policy
     });
   };
+
+  const applyBleBaselinePresetId = (presetId: string) => {
+    if (presetId === BLE_POLICY_CUSTOM_ID) {
+      onConfigChange({ ...config, blePolicyPresetId: BLE_POLICY_CUSTOM_ID });
+      return;
+    }
+    const resolvedId = normalizeBlePolicyPresetId(presetId);
+    const preset = getBlePolicyPreset(resolvedId);
+    if (!preset) {
+      return;
+    }
+    const fixed = fixedPolicyFromPreset(preset);
+    if (config.activePolicy.type === "fixed") {
+      onConfigChange({ ...config, blePolicyPresetId: resolvedId, activePolicy: fixed });
+      return;
+    }
+    onConfigChange({
+      ...config,
+      blePolicyPresetId: resolvedId,
+      activePolicy: motionPeerAdaptiveWithBleBaselineAnchors(config.activePolicy, resolvedId)
+    });
+  };
+
+  useEffect(() => {
+    const resolvedId = normalizeBlePolicyPresetId(config.blePolicyPresetId);
+    if (resolvedId !== config.blePolicyPresetId) {
+      onConfigChange({ ...config, blePolicyPresetId: resolvedId });
+    }
+  }, [config.blePolicyPresetId]);
+
+  const applyHardwareProfileId = (hardwareEnergyProfileId: string) => {
+    const next = { ...config, hardwareEnergyProfileId };
+    applyHardwareProfileToEnergy(next);
+    onConfigChange(next);
+  };
+
+  const syncFixedPolicyAndPreset = (fixed: FixedPolicyConfig) => {
+    onConfigChange({
+      ...config,
+      blePolicyPresetId: blePolicyPresetIdForFixedPolicy(fixed),
+      activePolicy: fixed
+    });
+  };
+
+  const neutralBaseline = bleBaselinePresetDefForSweep(config);
 
   return (
     <aside className={`panel controls-panel${isBuildDirty ? " controls-panel--stale" : ""}`}>
@@ -446,6 +502,32 @@ export function ControlsPanel({
         </p>
 
         <label>
+          BLE policy baseline
+          <select
+            value={config.blePolicyPresetId}
+            onChange={(event) => applyBleBaselinePresetId(event.target.value)}
+            aria-describedby="ble-baseline-help"
+          >
+            {Object.values(blePolicyPresets).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+            <option value={BLE_POLICY_CUSTOM_ID}>Custom schedule</option>
+          </select>
+        </label>
+        <p id="ble-baseline-help" className="helper-text">
+          Defines the fixed scan/advertise schedule used as the comparison point and the adaptive policy neutral setting. For
+          proximity logging, frequent advertising with periodic scanning often performs better than symmetric scan/advertise
+          timing. Hardware energy is configured separately below.
+        </p>
+        {config.blePolicyPresetId === "symmetric-example" ? (
+          <p className="helper-text warning-text" role="status">
+            Symmetric BLE schedules are easy to understand but may reduce discovery. Consider comparing against General discovery.
+          </p>
+        ) : null}
+
+        <label>
           Adaptive policy
           <select
             value={config.activePolicy.type}
@@ -455,10 +537,13 @@ export function ControlsPanel({
                 ...config,
                 activePolicy:
                   nextType === "motion_peer_adaptive"
-                    ? { ...defaultAdaptivePolicy }
+                    ? motionPeerAdaptiveWithBleBaselineAnchors(
+                        { ...defaultAdaptivePolicy },
+                        config.blePolicyPresetId
+                      )
                     : config.activePolicy.type === "fixed"
                       ? config.activePolicy
-                      : { ...juxtaMainCMode0FixedPolicy }
+                      : { ...generalDiscoveryFixedPolicy }
               });
             }}
           >
@@ -535,9 +620,9 @@ export function ControlsPanel({
               step="5"
               value={fixedPolicy.scanIntervalSeconds}
               onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, scanIntervalSeconds: Number(event.target.value) }
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  scanIntervalSeconds: Number(event.target.value)
                 })
               }
             />
@@ -552,9 +637,9 @@ export function ControlsPanel({
               step="0.5"
               value={fixedPolicy.scanWindowSeconds}
               onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, scanWindowSeconds: Number(event.target.value) }
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  scanWindowSeconds: Number(event.target.value)
                 })
               }
             />
@@ -569,9 +654,9 @@ export function ControlsPanel({
               step="5"
               value={fixedPolicy.advIntervalSeconds}
               onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: { ...fixedPolicy, advIntervalSeconds: Number(event.target.value) }
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  advIntervalSeconds: Number(event.target.value)
                 })
               }
             />
@@ -586,12 +671,9 @@ export function ControlsPanel({
               step="0.5"
               value={fixedPolicy.advertisingBurstDurationSeconds ?? 2}
               onChange={(event) =>
-                onConfigChange({
-                  ...config,
-                  activePolicy: {
-                    ...fixedPolicy,
-                    advertisingBurstDurationSeconds: Number(event.target.value)
-                  }
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  advertisingBurstDurationSeconds: Number(event.target.value)
                 })
               }
             />
@@ -809,7 +891,8 @@ export function ControlsPanel({
               />
             ) : (
               <p className="helper-text">
-                Neutral stays locked to the fixed-rate baseline: 20s scan, 1.5s window, 5s advertise.
+                Neutral stays locked to the BLE policy baseline: {neutralBaseline.scanIntervalSeconds}s scan,{" "}
+                {neutralBaseline.scanWindowSeconds}s window, {neutralBaseline.advIntervalSeconds}s advertise.
               </p>
             )}
           </details>
@@ -823,6 +906,22 @@ export function ControlsPanel({
           Component model: baseline µA plus scan (RX × listen-window seconds) and advertising (packet events × µC/event)
           for <strong>one representative collar</strong>. Empirical mode uses the bench total for 5s/20s minus baseline
           for that same collar.
+        </p>
+        <label>
+          Hardware energy profile
+          <select
+            value={config.hardwareEnergyProfileId}
+            onChange={(event) => applyHardwareProfileId(event.target.value)}
+          >
+            {Object.values(hardwareEnergyProfiles).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="helper-text">
+          Maps radio activity to current and pack size. Independent from the BLE schedule / policy baseline above.
         </p>
         <label>
           Energy model

@@ -1,3 +1,5 @@
+import { bleBaselinePresetDefForSweep } from "../blePolicyPresets";
+import { getHardwareEnergyProfile } from "../hardwareEnergyProfiles";
 import type { SimulationConfig } from "../types";
 import { SPECIES_PRESETS } from "../speciesPresets";
 import { DEFAULT_REPORT_SEED_COUNT, seedsForSweepMode } from "./adaptiveBleSweep";
@@ -28,7 +30,7 @@ export function buildSweepSimulationBrief(
   });
   const seedLine =
     sweepMode === "fast"
-      ? `${seeds[0]} (matches Fast preview)`
+      ? `${seeds[0]} (matches Simulated Seed)`
       : `${seeds.join(", ")} — means aggregated`;
 
   const enc = config.enclosure;
@@ -42,6 +44,10 @@ export function buildSweepSimulationBrief(
     config.energy.energyModel === "component"
       ? "Component (timing + events)"
       : "Empirical average";
+
+  const baselinePreset = bleBaselinePresetDefForSweep(config);
+  const hw =
+    getHardwareEnergyProfile(config.hardwareEnergyProfileId)?.label ?? config.hardwareEnergyProfileId;
 
   return [
     { label: "Species", value: species },
@@ -69,9 +75,14 @@ export function buildSweepSimulationBrief(
     },
     { label: "Energy", value: `${energyLabel} · ${config.energy.batteryCapacityMah} mAh pack` },
     {
+      label: "Comparison BLE baseline",
+      value: `${baselinePreset.label} — scan ${baselinePreset.scanIntervalSeconds}s / win ${baselinePreset.scanWindowSeconds}s / adv ${baselinePreset.advIntervalSeconds}s / burst ${baselinePreset.advertisingBurstDurationSeconds}s`
+    },
+    { label: "Hardware energy profile", value: hw },
+    {
       label: "Collar policy",
       value:
-        "Sweep substitutes policies (Juxta fixed baseline + adaptive grid). The collar type selected in Simulator is not run as-is."
+        "Sweep substitutes schedules (comparison baseline row + fixed-rate grid + adaptive grid). The active Simulator policy is not run as-is unless it matches a swept row."
     }
   ];
 }

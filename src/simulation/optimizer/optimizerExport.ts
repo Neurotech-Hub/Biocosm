@@ -364,7 +364,7 @@ export function buildOptimizerMarkdownReport(input: OptimizerMarkdownInput): str
   }
   lines.push("## Caveats and notes");
   lines.push(
-    "- The optimizer fits an empirical model to completed simulation sweeps. Recommendations may be **predicted_adaptive** (surrogate) or **observed_fixed** (from the sweep table, including the Juxta baseline when selected). None are final firmware settings — verify in simulation and on hardware before deployment."
+    "- The optimizer fits an empirical model to completed simulation sweeps. Recommendations may be **predicted_adaptive** (surrogate) or **observed_fixed** (from the sweep table, including the comparison baseline row when selected). None are final firmware settings — verify in simulation and on hardware before deployment."
   );
   lines.push(
     "- The model is trained under the current movement, sociality, radio, and energy assumptions. Changing species, enclosure, detection radius, or energy model may change the recommended policy."

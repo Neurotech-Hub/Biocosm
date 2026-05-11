@@ -1,8 +1,10 @@
+import { bleBaselinePresetDefForSweep, buildAdaptiveAnchorsFromBaseline } from "../blePolicyPresets";
+import { getHardwareEnergyProfile } from "../hardwareEnergyProfiles";
 import type { SimulationConfig } from "../types";
 import type { CandidatePick, SweepPolicyParams } from "./sweepCandidates";
 import type { SweepRawRow, SweepResultBundle } from "./adaptiveBleSweep";
 import type { SweepPolicySummary } from "./sweepCandidates";
-import { ADAPTIVE_SWEEP_TIMING_ANCHORS, SWEEP_HELD_ADAPTIVE } from "./adaptiveBleSweep";
+import { SWEEP_HELD_ADAPTIVE } from "./adaptiveBleSweep";
 
 function csvEscape(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) {
@@ -22,6 +24,7 @@ const RAW_HEADERS = [
   "scheduledScanIntervalSeconds",
   "scheduledScanWindowSeconds",
   "scheduledAdvIntervalSeconds",
+  "scheduledAdvertisingBurstDurationSeconds",
   "baselineDrive",
   "motionWeight",
   "peerWeight",
@@ -60,6 +63,7 @@ export function serializeSweepRawCsv(rows: SweepRawRow[]): string {
         row.scheduledScanIntervalSeconds ?? "",
         row.scheduledScanWindowSeconds ?? "",
         row.scheduledAdvIntervalSeconds ?? "",
+        row.scheduledAdvertisingBurstDurationSeconds ?? "",
         row.baselineDrive ?? "",
         row.motionWeight ?? "",
         row.peerWeight ?? "",
@@ -150,7 +154,7 @@ function summaryParamColumns(params: SweepPolicyParams | null): {
   };
 }
 
-/** Juxta baseline + all sweep summaries, sorted by mean BLE efficiency (matches UI table). */
+/** Comparison baseline + all sweep summaries, sorted by mean BLE efficiency (matches UI table). */
 function summariesRankedByEfficiency(bundle: SweepResultBundle): SweepPolicySummary[] {
   return [bundle.baselineSummary, ...bundle.summaries].sort(
     (a, b) => b.meanBleEfficiency - a.meanBleEfficiency
@@ -203,6 +207,10 @@ export function buildSweepMarkdownReport(options: {
 }): string {
   const { baseConfig, bundle, candidates } = options;
   const lines: string[] = [];
+  const presetDef = bleBaselinePresetDefForSweep(baseConfig);
+  const anchors = buildAdaptiveAnchorsFromBaseline(presetDef);
+  const hwLabel =
+    getHardwareEnergyProfile(baseConfig.hardwareEnergyProfileId)?.label ?? baseConfig.hardwareEnergyProfileId;
 
   lines.push("# BLE policy sweep report (fixed + adaptive)", "");
   lines.push("## 1. Simulation settings", "");
@@ -213,6 +221,8 @@ export function buildSweepMarkdownReport(options: {
   lines.push(`- Enclosure: ${baseConfig.enclosure.width}×${baseConfig.enclosure.height} m`);
   lines.push(`- Detection radius: ${baseConfig.radio.detectionRadiusMeters} m`);
   lines.push(`- Seeds: ${bundle.seedsUsed.join(", ")}`);
+  lines.push(`- Comparison BLE baseline: **${presetDef.label}** (\`${presetDef.id}\`)`);
+  lines.push(`- Hardware energy profile: **${hwLabel}** (\`${baseConfig.hardwareEnergyProfileId}\`)`);
   lines.push(
     `- Mode: ${
       bundle.mode === "fast"
@@ -220,14 +230,33 @@ export function buildSweepMarkdownReport(options: {
         : `Report — aggregated across seeds: ${bundle.seedsUsed.join(", ")}`
     }`
   );
+  if (presetDef.id === "general-discovery") {
+    lines.push(
+      "- Note: The default BLE policy is asymmetric because scan/advertise overlap drives proximity capture. Frequent advertising gives scanning collars more opportunities to detect nearby peers."
+    );
+  }
+  if (presetDef.id === "symmetric-example") {
+    lines.push(
+      "- Warning: The selected baseline is symmetric and may not represent an efficient discovery schedule."
+    );
+  }
   lines.push("");
-  lines.push("### Fixed baseline (sweep reference)");
-  lines.push(`- Scan ${juxtaTimingSnippet()}`);
+  lines.push("### Comparison baseline schedule");
+  lines.push(
+    `- Scan ${presetDef.scanIntervalSeconds}s interval / ${presetDef.scanWindowSeconds}s window / ${presetDef.advIntervalSeconds}s advertise / ${presetDef.advertisingBurstDurationSeconds}s burst`
+  );
   lines.push("");
   lines.push("### Adaptive timing anchors (held)");
-  lines.push(`- Low: scan ${ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.scanIntervalSeconds}s / window ${ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.scanWindowSeconds}s / adv ${ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity.advIntervalSeconds}s`);
-  lines.push(`- Neutral: ${ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.scanIntervalSeconds}s / ${ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.scanWindowSeconds}s / ${ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral.advIntervalSeconds}s`);
-  lines.push(`- High: ${ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.scanIntervalSeconds}s / ${ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.scanWindowSeconds}s / ${ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity.advIntervalSeconds}s`);
+  lines.push(
+    `- Low: scan ${anchors.lowIntensity.scanIntervalSeconds}s / window ${anchors.lowIntensity.scanWindowSeconds}s / adv ${anchors.lowIntensity.advIntervalSeconds}s`
+  );
+  lines.push(
+    `- Neutral: ${anchors.neutral.scanIntervalSeconds}s / ${anchors.neutral.scanWindowSeconds}s / ${anchors.neutral.advIntervalSeconds}s`
+  );
+  lines.push(
+    `- High: ${anchors.highIntensity.scanIntervalSeconds}s / ${anchors.highIntensity.scanWindowSeconds}s / ${anchors.highIntensity.advIntervalSeconds}s`
+  );
+  lines.push(`- Burst (anchors): ${anchors.advertisingBurstDurationSeconds}s`);
   lines.push(`- Held: τ motion ${SWEEP_HELD_ADAPTIVE.tauMotionSeconds}s, motion gain ${SWEEP_HELD_ADAPTIVE.motionGain}, peer gain ${SWEEP_HELD_ADAPTIVE.peerGain}, peer penalty ${SWEEP_HELD_ADAPTIVE.peerMissPenalty}, downscale ${SWEEP_HELD_ADAPTIVE.allowEnergySavingDownscale}`);
   lines.push("");
 
@@ -242,7 +271,8 @@ export function buildSweepMarkdownReport(options: {
 
   lines.push("## 3. Top recommendations (efficiency leaders)", "");
   for (const pick of candidates) {
-    const title = pick.role === "bestFixed" ? "Best fixed-rate (incl. Juxta 5.6 pool)" : "Best adaptive";
+    const title =
+      pick.role === "bestFixed" ? "Best fixed-rate (incl. comparison baseline pool)" : "Best adaptive";
     lines.push(`### ${title}`);
     if (!pick.summary) {
       lines.push("*No policy selected.*", "");
@@ -269,8 +299,4 @@ export function buildSweepMarkdownReport(options: {
   lines.push("Use the UI to download raw CSV (per seed), summary CSV, and machine-readable tables.");
 
   return lines.join("\n");
-}
-
-function juxtaTimingSnippet(): string {
-  return "20s interval / 1.5s window / 5s advertise / 2s burst (Juxta-style)";
 }

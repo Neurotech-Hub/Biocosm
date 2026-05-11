@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { AssumptionsPanel } from "./components/AssumptionsPanel";
 import { CanvasVisualizer } from "./components/CanvasVisualizer";
 import { ControlsPanel } from "./components/ControlsPanel";
@@ -9,6 +9,7 @@ import { SweepControlsPanel } from "./components/SweepControlsPanel";
 import { SweepReportPanel } from "./components/SweepReportPanel";
 import { TimeSeriesPanel } from "./components/TimeSeriesPanel";
 import { TimelinePanel } from "./components/TimelinePanel";
+import { WorkspaceLoadModal } from "./components/WorkspaceLoadModal";
 import { computeMetrics } from "./simulation/analysis";
 import { defaultSimulationConfig } from "./simulation/config";
 import { mergeLogs, stepSimulation } from "./simulation/engine";
@@ -34,17 +35,55 @@ import {
 import type { SimulationConfig, SimulationLogs, SimulationMetrics, SimulationState } from "./simulation/types";
 import { PLAYBACK_SPEED_MULTIPLIER } from "./playbackConstants";
 import { createInitialSimulation } from "./simulation/world";
+import {
+  buildWorkspaceFile,
+  downloadWorkspaceJson,
+  parseWorkspaceFileText,
+  readTextFromFile,
+  serializeWorkspaceFile,
+  workspaceFilename,
+  type WorkspaceLoadParams,
+  type WorkspaceTab
+} from "./workspace/workspaceFile";
 
-type WorkspaceTab = "simulator" | "sweep";
+export type SimulationBuild = {
+  timeline: SimulationState[];
+  logs: SimulationLogs;
+  timeSeries: TimeSeriesPoint[];
+  adaptiveBleTimeSeries: ReturnType<typeof buildAdaptiveBleTimeSeries>;
+  fixedBleTimeSeries: ReturnType<typeof buildFixedBleTimeSeries>;
+  animalStripEvents: AnimalStripEvent[];
+  animalIdsStripOrder: string[];
+  metrics: SimulationMetrics;
+};
+
+/** Single-step snapshot so the first paint is cheap; full timeline is filled by `createTimelineAsync`. */
+function createPlaceholderBuild(initial: SimulationState): SimulationBuild {
+  const timelineLocal = [initial];
+  return {
+    timeline: timelineLocal,
+    logs: initial.logs,
+    timeSeries: buildTimeSeries(timelineLocal),
+    adaptiveBleTimeSeries: buildAdaptiveBleTimeSeries(timelineLocal),
+    fixedBleTimeSeries: buildFixedBleTimeSeries(timelineLocal),
+    animalStripEvents: buildAnimalStripEvents(initial.logs),
+    animalIdsStripOrder: sortedAnimalIdsFromLogs(initial.logs),
+    metrics: computeMetrics(initial, initial.logs)
+  };
+}
 
 export function App() {
+  const activeBuildIdRef = useRef(0);
+
   const [draftConfig, setDraftConfig] = useState<SimulationConfig>(defaultSimulationConfig);
   const [builtConfig, setBuiltConfig] = useState<SimulationConfig>(defaultSimulationConfig);
-  const [build, setBuild] = useState<SimulationBuild>(() => createSimulationBuild(createInitialSimulation(defaultSimulationConfig)));
+  const [build, setBuild] = useState<SimulationBuild>(() =>
+    createPlaceholderBuild(createInitialSimulation(defaultSimulationConfig))
+  );
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuildDirty, setIsBuildDirty] = useState(false);
-  const [buildProgress, setBuildProgress] = useState<BuildProgress>({ isBuilding: false, percent: 100 });
+  const [buildProgress, setBuildProgress] = useState<BuildProgress>({ isBuilding: true, percent: 0 });
   const [showTrueProximity, setShowTrueProximity] = useState(true);
   const [showObservedDetections, setShowObservedDetections] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("simulator");
@@ -56,6 +95,11 @@ export function App() {
   const [sweepResult, setSweepResult] = useState<SweepBundleWithCandidates | null>(null);
   const [sweepError, setSweepError] = useState<string | null>(null);
   const sweepAbortRef = useRef<AbortController | null>(null);
+  const workspaceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [workspaceFileMessage, setWorkspaceFileMessage] = useState<string | null>(null);
+  const [workspaceLoadActive, setWorkspaceLoadActive] = useState(false);
+  const [workspaceLoadPendingSweep, setWorkspaceLoadPendingSweep] = useState(false);
+  const workspaceLoadShouldSweepRef = useRef(false);
   const timeline = build.timeline;
   const simulation = timeline[currentStep] ?? timeline[0];
   const totalSteps = Math.max(0, timeline.length - 1);
@@ -78,12 +122,56 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [isPlaying, totalSteps]);
 
+  const runBuildSimulation = useCallback(
+    (
+      configToBuild: SimulationConfig,
+      options?: { clearDirtyOnComplete?: boolean; onComplete?: () => void }
+    ) => {
+      const myId = ++activeBuildIdRef.current;
+      const clearDirtyOnComplete = options?.clearDirtyOnComplete !== false;
+      const onCompleteCb = options?.onComplete;
+      setIsPlaying(false);
+      setCurrentStep(0);
+      setBuildProgress({ isBuilding: true, percent: 0 });
+
+      window.setTimeout(() => {
+        createTimelineAsync(
+          createInitialSimulation(configToBuild),
+          (percent) => {
+            if (activeBuildIdRef.current === myId) {
+              setBuildProgress({ isBuilding: true, percent });
+            }
+          },
+          (nextBuild) => {
+            if (activeBuildIdRef.current !== myId) {
+              return;
+            }
+            setBuiltConfig(configToBuild);
+            setBuild(nextBuild);
+            setCurrentStep(0);
+            if (clearDirtyOnComplete) {
+              setIsBuildDirty(false);
+            }
+            setBuildProgress({ isBuilding: false, percent: 100 });
+            onCompleteCb?.();
+          }
+        );
+      }, 0);
+    },
+    []
+  );
+
+  useEffect(() => {
+    runBuildSimulation(defaultSimulationConfig);
+  }, [runBuildSimulation]);
+
   const runSweep = async () => {
     setSweepError(null);
     setSweepResult(null);
     const trials = buildSweepTrials(sweepMode, String(builtConfig.seed), {
       gridVariant: sweepGridVariant,
-      reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined
+      reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined,
+      simulationConfig: builtConfig
     });
     setSweepProgress({ completed: 0, total: trials.length });
     setSweepRunning(true);
@@ -112,34 +200,89 @@ export function App() {
     sweepAbortRef.current?.abort();
   };
 
-  const runBuildSimulation = (configToBuild: SimulationConfig) => {
-    if (buildProgress.isBuilding) {
-      return;
-    }
-    setIsPlaying(false);
-    setCurrentStep(0);
-    setBuildProgress({ isBuilding: true, percent: 0 });
+  const runSweepForWorkspaceLoad = async (params: WorkspaceLoadParams) => {
+    setSweepError(null);
+    setSweepResult(null);
+    const trials = buildSweepTrials(params.sweepMode, String(params.config.seed), {
+      gridVariant: params.sweepGridVariant,
+      reportSeedCount: params.sweepMode === "report" ? params.reportSeedCount : undefined,
+      simulationConfig: params.config
+    });
+    setSweepProgress({ completed: 0, total: trials.length });
+    setSweepRunning(true);
+    const controller = new AbortController();
+    sweepAbortRef.current = controller;
 
-    window.setTimeout(() => {
-      createTimelineAsync(
-        createInitialSimulation(configToBuild),
-        (percent) => setBuildProgress({ isBuilding: true, percent }),
-        (nextBuild) => {
-          setBuiltConfig(configToBuild);
-          setBuild(nextBuild);
-          setCurrentStep(0);
-          setIsBuildDirty(false);
-          setBuildProgress({ isBuilding: false, percent: 100 });
+    try {
+      const rows = await runSweepTrialsChunked(params.config, trials, {
+        signal: controller.signal,
+        onProgress: (completed, total) => setSweepProgress({ completed, total })
+      });
+      setSweepResult(finalizeSweepBundle(rows, params.sweepMode));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setSweepError("Sweep cancelled.");
+      } else {
+        setSweepError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setSweepRunning(false);
+      sweepAbortRef.current = null;
+      setWorkspaceLoadActive(false);
+    }
+  };
+
+  const startWorkspaceLoad = (params: WorkspaceLoadParams) => {
+    activeBuildIdRef.current += 1;
+    sweepAbortRef.current?.abort();
+    setSweepRunning(false);
+    setSweepError(null);
+    setIsPlaying(false);
+
+    setDraftConfig(params.config);
+    setBuiltConfig(params.config);
+    setIsBuildDirty(false);
+    setShowTrueProximity(params.view.showTrueProximity);
+    setShowObservedDetections(params.view.showObservedDetections);
+    setSweepMode(params.sweepMode);
+    setSweepGridVariant(params.sweepGridVariant);
+    setReportSeedCount(params.reportSeedCount);
+    setSweepResult(null);
+    setWorkspaceTab(params.workspaceTab);
+
+    setBuild(createPlaceholderBuild(createInitialSimulation(params.config)));
+    setCurrentStep(0);
+
+    workspaceLoadShouldSweepRef.current = params.shouldRunSweep;
+    setWorkspaceLoadPendingSweep(params.shouldRunSweep);
+    setWorkspaceLoadActive(true);
+
+    runBuildSimulation(params.config, {
+      clearDirtyOnComplete: true,
+      onComplete: () => {
+        if (workspaceLoadShouldSweepRef.current) {
+          void runSweepForWorkspaceLoad(params);
+        } else {
+          setWorkspaceLoadActive(false);
         }
-      );
-    }, 0);
+      }
+    });
+  };
+
+  const cancelWorkspaceLoad = () => {
+    activeBuildIdRef.current += 1;
+    sweepAbortRef.current?.abort();
+    workspaceLoadShouldSweepRef.current = false;
+    setWorkspaceLoadPendingSweep(false);
+    setWorkspaceLoadActive(false);
+    setBuildProgress({ isBuilding: false, percent: 0 });
   };
 
   const simulateSweepPolicy = (summary: SweepPolicySummary) => {
     if (!summary.params || buildProgress.isBuilding) {
       return;
     }
-    const policy = firmwarePolicyFromSweepSummary(summary);
+    const policy = firmwarePolicyFromSweepSummary(summary, builtConfig);
     if (!policy) {
       return;
     }
@@ -149,11 +292,48 @@ export function App() {
     runBuildSimulation(nextConfig);
   };
 
-  const navStatusLabel = buildProgress.isBuilding
-    ? `Building ${buildProgress.percent}%`
-    : isBuildDirty
-      ? "Draft settings — rebuild to apply"
-      : "Built";
+  const handleSaveWorkspace = () => {
+    try {
+      const params: WorkspaceLoadParams = {
+        config: draftConfig,
+        view: { showTrueProximity, showObservedDetections },
+        sweepMode,
+        sweepGridVariant,
+        reportSeedCount,
+        shouldRunSweep: sweepResult != null,
+        workspaceTab
+      };
+      downloadWorkspaceJson(workspaceFilename(draftConfig.seed), serializeWorkspaceFile(buildWorkspaceFile(params)));
+      setWorkspaceFileMessage("Workspace saved.");
+    } catch (err) {
+      setWorkspaceFileMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handlePickWorkspaceFile = () => {
+    workspaceFileInputRef.current?.click();
+  };
+
+  const handleWorkspaceFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    try {
+      const text = await readTextFromFile(file);
+      const parsed = parseWorkspaceFileText(text);
+      if (!parsed.ok) {
+        setWorkspaceFileMessage(parsed.error);
+        return;
+      }
+      startWorkspaceLoad(parsed.data);
+      const suffix = parsed.warnings.length ? ` ${parsed.warnings.join(" ")}` : "";
+      setWorkspaceFileMessage(`Loaded workspace.${suffix}`);
+    } catch (err) {
+      setWorkspaceFileMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   return (
     <main className="app-shell">
@@ -183,11 +363,33 @@ export function App() {
             </button>
           </nav>
 
-          <div className="app-topnav-meta" title="Last built simulation — sweeps use this world configuration">
-            <span className="app-topnav-meta-seed">Seed {builtConfig.seed}</span>
-            <span className="app-topnav-meta-status" aria-live="polite">
-              {navStatusLabel}
-            </span>
+          <div className="app-topnav-file-actions" aria-label="Workspace file">
+            <input
+              ref={workspaceFileInputRef}
+              type="file"
+              className="app-workspace-file-input"
+              accept=".json,.biocosm.json,application/json"
+              aria-hidden
+              tabIndex={-1}
+              onChange={handleWorkspaceFileChange}
+            />
+            <div className="app-topnav-workspace-live" aria-live="polite" aria-atomic="true">
+              {workspaceFileMessage ?? ""}
+            </div>
+            <button
+              type="button"
+              className="secondary-button app-topnav-workspace-button"
+              onClick={handleSaveWorkspace}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="secondary-button app-topnav-workspace-button"
+              onClick={handlePickWorkspaceFile}
+            >
+              Load
+            </button>
           </div>
         </div>
       </header>
@@ -195,6 +397,32 @@ export function App() {
       {workspaceTab === "simulator" ? (
       <section className="workspace">
         <div className="visual-column">
+          {buildProgress.isBuilding ? (
+            <div className="simulator-visual-building" aria-busy="true">
+              <div className="simulator-visual-building-card">
+                <p className="simulator-visual-building-title">Building simulation…</p>
+                <div
+                  className="build-progress"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={buildProgress.percent}
+                  aria-label="Simulation build progress"
+                >
+                  <div className="build-progress-label">
+                    <span>Progress</span>
+                    <span>{buildProgress.percent}%</span>
+                  </div>
+                  <div className="build-progress-track" aria-hidden="true">
+                    <div className="build-progress-bar" style={{ width: `${buildProgress.percent}%` }} />
+                  </div>
+                </div>
+                <p className="simulator-visual-building-hint">
+                  Charts and timeline update when the run finishes. You can still change settings in the sidebar.
+                </p>
+              </div>
+            </div>
+          ) : null}
           <TimelinePanel
             currentStep={currentStep}
             totalSteps={totalSteps}
@@ -298,6 +526,15 @@ export function App() {
         </div>
       </section>
       )}
+      {workspaceLoadActive ? (
+        <WorkspaceLoadModal
+          buildProgress={buildProgress}
+          sweepProgress={sweepProgress}
+          sweepRunning={sweepRunning}
+          shouldRunSweep={workspaceLoadPendingSweep}
+          onCancel={cancelWorkspaceLoad}
+        />
+      ) : null}
     </main>
   );
 }
@@ -306,41 +543,6 @@ export type BuildProgress = {
   isBuilding: boolean;
   percent: number;
 };
-
-type SimulationBuild = {
-  timeline: SimulationState[];
-  logs: SimulationLogs;
-  timeSeries: TimeSeriesPoint[];
-  adaptiveBleTimeSeries: ReturnType<typeof buildAdaptiveBleTimeSeries>;
-  fixedBleTimeSeries: ReturnType<typeof buildFixedBleTimeSeries>;
-  animalStripEvents: AnimalStripEvent[];
-  animalIdsStripOrder: string[];
-  metrics: SimulationMetrics;
-};
-
-function createSimulationBuild(initialState: SimulationState): SimulationBuild {
-  const timeline = [initialState];
-  let logs = initialState.logs;
-  const totalSteps = Math.floor(initialState.config.simulationLengthSeconds / initialState.config.timeStepSeconds);
-  let current = initialState;
-
-  for (let step = 0; step < totalSteps; step += 1) {
-    current = stepSimulation(current);
-    logs = mergeLogs(logs, current.logs);
-    timeline.push(current);
-  }
-
-  return {
-    timeline,
-    logs,
-    timeSeries: buildTimeSeries(timeline),
-    adaptiveBleTimeSeries: buildAdaptiveBleTimeSeries(timeline),
-    fixedBleTimeSeries: buildFixedBleTimeSeries(timeline),
-    animalStripEvents: buildAnimalStripEvents(logs),
-    animalIdsStripOrder: sortedAnimalIdsFromLogs(logs),
-    metrics: computeMetrics(current, logs)
-  };
-}
 
 function createTimelineAsync(
   initialState: SimulationState,

@@ -53,7 +53,7 @@ describe("attachParetoEfficiency", () => {
     const baseline: SweepPolicySummary = {
       ...fixedSummary("base", 0.5, 6),
       kind: "baseline_fixed",
-      isJuxtaReference: true
+      isComparisonBaseline: true
     };
     const s1 = fixedSummary("s1", 0.45, 7);
     const out = attachParetoEfficiency(baseline, [s1]);

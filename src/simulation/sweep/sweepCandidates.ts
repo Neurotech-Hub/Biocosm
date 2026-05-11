@@ -14,14 +14,15 @@ export type SweepPolicyParams =
       scanIntervalSeconds: number;
       scanWindowSeconds: number;
       advIntervalSeconds: number;
+      advertisingBurstDurationSeconds?: number;
     };
 
 export type SweepPolicySummary = {
   policyId: string;
   kind: PolicyKind;
   label: string;
-  /** True only for the canonical Juxta 5.6 reference row. */
-  isJuxtaReference?: boolean;
+  /** True for the selected comparison BLE baseline row (`baseline_fixed`). */
+  isComparisonBaseline?: boolean;
   params: SweepPolicyParams | null;
   /** Mean across seeds (report mode) or single value (fast mode). */
   meanCaptureRate: number;
@@ -125,13 +126,13 @@ export function pickSweepCandidates(
   const meetsAdaptiveThreshold = Boolean(bestAdaptiveEligible);
 
   const noteFixed =
-    bestFixed && bestFixed.isJuxtaReference
-      ? "Best fixed-rate in this sweep is the Juxta 5.6 reference schedule."
+    bestFixed && bestFixed.isComparisonBaseline
+      ? "Best fixed-rate in this sweep is the comparison baseline schedule."
       : undefined;
 
   const noteAdaptive =
     !meetsAdaptiveThreshold && bestAdaptiveOverall
-      ? `No adaptive policy reached ${(MIN_CAPTURE_FRAC * 100).toFixed(0)}% of Juxta capture; showing best-efficiency adaptive anyway.`
+      ? `No adaptive policy reached ${(MIN_CAPTURE_FRAC * 100).toFixed(0)}% of baseline capture; showing best-efficiency adaptive anyway.`
       : undefined;
 
   return [

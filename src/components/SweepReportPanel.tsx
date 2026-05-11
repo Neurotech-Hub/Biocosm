@@ -1,5 +1,6 @@
-import { useMemo, type CSSProperties, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { InfoPopover } from "./InfoPopover";
+import { bleBaselinePresetDefForSweep } from "../simulation/blePolicyPresets";
 import type { SimulationConfig } from "../simulation/types";
 import type { CandidatePick, SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
 import type { SweepBundleWithCandidates, SweepRawRow } from "../simulation/sweep/adaptiveBleSweep";
@@ -40,10 +41,13 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
   }
   if (summary.params.family === "fixed" && active.type === "fixed") {
     const p = summary.params;
+    const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
+    const burstA = active.advertisingBurstDurationSeconds ?? 2;
     return (
       nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
       nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
-      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds)
+      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
+      nearlyEqual(burstP, burstA)
     );
   }
   return false;
@@ -74,8 +78,8 @@ const SWEEP_AXES_POPOVER_CAPTURE_VS_ENERGY = (
 );
 
 function algBadge(summary: SweepPolicySummary): { letter: string; title: string; className: string } {
-  if (summary.isJuxtaReference || summary.kind === "baseline_fixed") {
-    return { letter: "J", title: "Juxta 5.6 reference (fixed)", className: "sweep-alg sweep-alg-juxta" };
+  if (summary.isComparisonBaseline || summary.kind === "baseline_fixed") {
+    return { letter: "B", title: "Comparison baseline (fixed)", className: "sweep-alg sweep-alg-juxta" };
   }
   if (summary.kind === "fixed_sweep") {
     return { letter: "F", title: "Fixed-rate BLE", className: "sweep-alg sweep-alg-fixed" };
@@ -107,15 +111,26 @@ const SWEEP_METRIC_COLUMNS = [
   "capture",
   "mAh",
   "efficiency",
-  "relCap",
-  "relE",
-  "meanDrive",
-  "pctBelow",
-  "pctNear",
-  "pctAbove"
+  "meanDrive"
 ] as const;
 
 type SweepMetricColumn = (typeof SWEEP_METRIC_COLUMNS)[number];
+
+const SWEEP_TABLE_SORT_KEYS = [
+  "bd",
+  "mw",
+  "pw",
+  "tauPeer",
+  "scanInt",
+  "scanWin",
+  "advInt",
+  "capture",
+  "mAh",
+  "efficiency",
+  "meanDrive"
+] as const;
+
+type SweepTableSortKey = (typeof SWEEP_TABLE_SORT_KEYS)[number];
 
 const SWEEP_COLUMN_SENTIMENT: Record<SweepMetricColumn, "higherBetter" | "lowerBetter"> = {
   rank: "lowerBetter",
@@ -129,12 +144,7 @@ const SWEEP_COLUMN_SENTIMENT: Record<SweepMetricColumn, "higherBetter" | "lowerB
   capture: "higherBetter",
   mAh: "lowerBetter",
   efficiency: "higherBetter",
-  relCap: "higherBetter",
-  relE: "lowerBetter",
-  meanDrive: "higherBetter",
-  pctBelow: "higherBetter",
-  pctNear: "higherBetter",
-  pctAbove: "higherBetter"
+  meanDrive: "higherBetter"
 };
 
 function sweepRowDerivedMetrics(summary: SweepPolicySummary, rawRows: SweepRawRow[]) {
@@ -147,10 +157,7 @@ function sweepRowDerivedMetrics(summary: SweepPolicySummary, rawRows: SweepRawRo
     return values.reduce((accumulator, value) => accumulator + value, 0) / values.length;
   };
   return {
-    meanDrive: avgNullable((row) => row.meanSamplingDrive),
-    pctBelow: avgNullable((row) => row.percentTimeBelowFixed),
-    pctNear: avgNullable((row) => row.percentTimeNearFixed),
-    pctAbove: avgNullable((row) => row.percentTimeAboveFixed)
+    meanDrive: avgNullable((row) => row.meanSamplingDrive)
   };
 }
 
@@ -194,26 +201,48 @@ function extractSweepMetricValue(
   if (column === "efficiency") {
     return summary.meanBleEfficiency;
   }
-  if (column === "relCap") {
-    return summary.meanRelativeCapture;
-  }
-  if (column === "relE") {
-    return summary.meanRelativeEnergy;
-  }
   const derived = sweepRowDerivedMetrics(summary, rawRows);
   if (column === "meanDrive") {
     return derived.meanDrive;
   }
-  if (column === "pctBelow") {
-    return derived.pctBelow;
-  }
-  if (column === "pctNear") {
-    return derived.pctNear;
-  }
-  if (column === "pctAbove") {
-    return derived.pctAbove;
-  }
   return null;
+}
+
+function defaultSortDirection(key: SweepTableSortKey): "asc" | "desc" {
+  return key === "mAh" ? "asc" : "desc";
+}
+
+function sortValueForColumn(
+  summary: SweepPolicySummary,
+  key: SweepTableSortKey,
+  rawRows: SweepRawRow[]
+): number | null {
+  return extractSweepMetricValue(summary, null, key as SweepMetricColumn, rawRows);
+}
+
+function compareSummariesForSort(
+  a: SweepPolicySummary,
+  b: SweepPolicySummary,
+  key: SweepTableSortKey,
+  dir: "asc" | "desc",
+  rawRows: SweepRawRow[]
+): number {
+  const va = sortValueForColumn(a, key, rawRows);
+  const vb = sortValueForColumn(b, key, rawRows);
+  const sign = dir === "asc" ? 1 : -1;
+  if (va == null && vb == null) {
+    return a.policyId.localeCompare(b.policyId);
+  }
+  if (va == null) {
+    return 1;
+  }
+  if (vb == null) {
+    return -1;
+  }
+  if (va === vb) {
+    return a.policyId.localeCompare(b.policyId);
+  }
+  return sign * (va - vb);
 }
 
 function buildSweepColumnRanges(
@@ -285,15 +314,26 @@ export function SweepReportPanel({
   onSimulatePolicy,
   simulateDisabled = false
 }: SweepReportPanelProps) {
-  /** Baseline + all policies, sorted by mean BLE efficiency (table and summary CSV). */
-  const tableRowsRanked = useMemo(() => {
+  const [tableSortKey, setTableSortKey] = useState<SweepTableSortKey>("efficiency");
+  const [tableSortDir, setTableSortDir] = useState<"asc" | "desc">(() => defaultSortDirection("efficiency"));
+
+  /** Baseline + all policies (unsorted multiset for resorting). */
+  const policiesUnordered = useMemo(() => {
     if (!sweepResult) {
       return [];
     }
-    return [sweepResult.baselineSummary, ...sweepResult.summaries].sort(
-      (a, b) => b.meanBleEfficiency - a.meanBleEfficiency
-    );
+    return [sweepResult.baselineSummary, ...sweepResult.summaries];
   }, [sweepResult]);
+
+  /** Candidate table row order (sortable). */
+  const displayedPolicies = useMemo(() => {
+    if (!sweepResult || policiesUnordered.length === 0) {
+      return [];
+    }
+    const copy = [...policiesUnordered];
+    copy.sort((a, b) => compareSummariesForSort(a, b, tableSortKey, tableSortDir, sweepResult.rawRows));
+    return copy;
+  }, [policiesUnordered, sweepResult, tableSortKey, tableSortDir]);
 
   /** Sweep summaries only (plots keep a separate dashed Juxta reference point). */
   const summariesByEfficiency = useMemo(() => {
@@ -307,21 +347,30 @@ export function SweepReportPanel({
     if (!sweepResult) {
       return null;
     }
-    const rows = tableRowsRanked.map((summary, index) => ({
+    const rows = displayedPolicies.map((summary, index) => ({
       summary,
       rank: index + 1
     }));
     const ranges = buildSweepColumnRanges(rows, sweepResult.rawRows);
     const byPolicy = new Map<string, Record<SweepMetricColumn, CSSProperties>>();
-    for (let index = 0; index < tableRowsRanked.length; index++) {
-      const summary = tableRowsRanked[index]!;
+    for (let index = 0; index < displayedPolicies.length; index++) {
+      const summary = displayedPolicies[index]!;
       byPolicy.set(
         summary.policyId,
         metricStylesForRow(summary, index + 1, sweepResult.rawRows, ranges)
       );
     }
     return { byPolicy };
-  }, [sweepResult, tableRowsRanked]);
+  }, [sweepResult, displayedPolicies]);
+
+  const onSortColumnHeader = (key: SweepTableSortKey) => {
+    if (tableSortKey === key) {
+      setTableSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setTableSortKey(key);
+      setTableSortDir(defaultSortDirection(key));
+    }
+  };
 
   const captureVsEnergyPoints = useMemo((): ScatterPoint[] => {
     return summariesByEfficiency.map((summary) => ({
@@ -373,14 +422,20 @@ export function SweepReportPanel({
   };
 
   const hasResult = Boolean(sweepResult);
-  const sweepTableColSpan = 20;
+  const sweepTableColSpan = 13;
+  const comparisonBleMeta = bleBaselinePresetDefForSweep(baseConfig);
 
   return (
     <div className="sweep-report-panel">
       {sweepResult ? (
-        <SweepCandidatesSection candidates={sweepResult.candidates} baseline={sweepResult.baselineSummary} />
+        <SweepFixedAdaptiveComparisonTable
+          baseline={sweepResult.baselineSummary}
+          candidates={sweepResult.candidates}
+          onSimulatePolicy={onSimulatePolicy}
+          simulateDisabled={simulateDisabled}
+        />
       ) : (
-        <SweepRecommendationsPlaceholder />
+        <SweepComparisonPlaceholder />
       )}
 
       <div className="sweep-plots-grid sweep-plots-grid--single">
@@ -395,8 +450,8 @@ export function SweepReportPanel({
             baselinePoint={{
               x: sweepResult.baselineSummary.meanMahPerDay,
               y: sweepResult.baselineSummary.meanCaptureRate,
-              label: "Juxta 5.6",
-              tooltip: `Juxta 5.6 reference (${sweepResult.baselineSummary.policyId}) — 20s scan interval / 1.5s scan window / 5s advertise interval; dashed ring distinguishes reference among yellow fixed-rate points`,
+              label: comparisonBleMeta.label,
+              tooltip: `${comparisonBleMeta.label} (${sweepResult.baselineSummary.policyId}) — comparison baseline from your Simulator BLE policy preset; dashed ring distinguishes reference among yellow fixed-rate points`,
               pareto: sweepResult.baselineSummary.isParetoEfficient
             }}
             baselineMatchesBuilt={sweepSummaryMatchesBuilt(sweepResult.baselineSummary, baseConfig)}
@@ -419,23 +474,20 @@ export function SweepReportPanel({
           <InfoPopover label="Explain candidate table columns" title="Candidate table columns">
             <dl className="metric-definition-list">
               <dt>Rank</dt>
-              <dd>Order by mean BLE efficiency across every policy in the sweep, including Juxta 5.6 (1 = highest).</dd>
-              <dt>Alg</dt>
+              <dd>Current row index after sorting (1 = top row). Sort with column headers to change order.</dd>
+              <dt>Alg · Pareto</dt>
               <dd>
-                <strong>J</strong> = Juxta 5.6 reference (fixed), <strong>F</strong> = other fixed-rate schedule,{" "}
-                <strong>A</strong> = adaptive.
+                <strong>B</strong> = comparison baseline (fixed), <strong>F</strong> = other fixed-rate schedule,{" "}
+                <strong>A</strong> = adaptive. Hover for full policy id. <strong>Green circle</strong> = Pareto-efficient on
+                capture vs mAh/day; <strong>red</strong> = dominated. Use <strong>Simulate</strong> to load the row into the
+                Simulator tab. Violet outline on plots marks the policy matching your current built simulation when applicable.
               </dd>
               <dt>Cell tint</dt>
               <dd>
                 Each numeric column uses a red→yellow→green scale from worst to best within that column across all rows
-                (including Juxta). mAh/day and relative energy are greener when lower; capture, efficiency, and most other
-                metrics are greener when higher. Schedule and adaptive parameter columns use highest value as green when the
-                tradeoff is ambiguous. Em dash cells are neutral.
-              </dd>
-              <dt>Policy</dt>
-              <dd>
-                Sweep policy id. Use <strong>Simulate</strong> to load into the Simulator tab (auto-build). Violet outline
-                on plots marks the policy matching your current built simulation when applicable.
+                (including the comparison baseline). mAh/day is greener when lower; capture, efficiency, and most other metrics
+                are greener when higher. Schedule and adaptive parameter columns use highest value as green when the tradeoff is
+                ambiguous. Em dash cells are neutral.
               </dd>
               <dt>bd / mw / pw / τ peer</dt>
               <dd>Adaptive swept parameters only (— for fixed-rate rows).</dd>
@@ -450,19 +502,8 @@ export function SweepReportPanel({
               <dd>Mean estimated representative-collar BLE energy burden (milliamp-hours per day).</dd>
               <dt>Efficiency</dt>
               <dd>BLE hits per unit energy (capture rate scaled by estimated mAh/day), same notion as simulator metrics panels.</dd>
-              <dt>Pareto</dt>
-              <dd>
-                Yes if this policy is <strong>not dominated</strong> on mean capture rate vs mean mAh/day by any other policy
-                in the sweep (including Juxta). Same rule as the green outline on scatter plots.
-              </dd>
-              <dt>Rel cap</dt>
-              <dd>{`Mean relative capture vs Juxta 5.6 (< 1 weaker, > 1 stronger).`}</dd>
-              <dt>Rel E</dt>
-              <dd>{`Mean relative BLE energy vs Juxta 5.6 (< 1 uses less energy).`}</dd>
               <dt>Mean drive</dt>
               <dd>Adaptive mean sampling drive (— for fixed-rate).</dd>
-              <dt>% below / near / above</dt>
-              <dd>Adaptive drive distribution vs fixed-rate band (— for fixed-rate).</dd>
             </dl>
           </InfoPopover>
         </div>
@@ -471,31 +512,40 @@ export function SweepReportPanel({
             <thead>
               <tr>
                 <th>Rank</th>
-                <th title="Algorithm family">Alg</th>
-                <th>Policy</th>
-                <th>bd</th>
-                <th>mw</th>
-                <th>pw</th>
-                <th>τ peer</th>
-                <th title="BLE scan interval">Scan int. (s)</th>
-                <th title="Scan burst listen window">Scan win. (s)</th>
-                <th title="Interval between advertising bursts">Advertise int. (s)</th>
-                <th>Capture</th>
-                <th>mAh/day</th>
-                <th>Efficiency</th>
-                <th title="Non-dominated on capture vs mAh/day">Pareto</th>
-                <th>Rel cap</th>
-                <th>Rel E</th>
-                <th>Mean drive</th>
-                <th>% below</th>
-                <th>% near</th>
-                <th>% above</th>
+                <th className="sweep-th-alg-pareto" title="Algorithm family, Pareto marker (green = efficient), hover for policy id">
+                  Alg · Pareto
+                </th>
+                {(
+                  [
+                    ["bd", "bd", "Adaptive baseline drive"],
+                    ["mw", "mw", "Motion weight"],
+                    ["pw", "pw", "Peer weight"],
+                    ["tauPeer", "τ peer", "τ peer (s)"],
+                    ["scanInt", "Scan int. (s)", "BLE scan interval"],
+                    ["scanWin", "Scan win. (s)", "Scan burst listen window"],
+                    ["advInt", "Advertise int. (s)", "Interval between advertising bursts"],
+                    ["capture", "Capture", "Mean BLE capture rate"],
+                    ["mAh", "mAh/day", "Mean energy burden"],
+                    ["efficiency", "Efficiency", "BLE efficiency (capture / mAh·day)"],
+                    ["meanDrive", "Mean drive", "Adaptive mean sampling drive"]
+                  ] as const
+                ).map(([key, label, hint]) => (
+                  <SweepSortableTh
+                    key={key}
+                    columnKey={key as SweepTableSortKey}
+                    label={label}
+                    hint={hint}
+                    activeKey={tableSortKey}
+                    dir={tableSortDir}
+                    onSort={onSortColumnHeader}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
               {sweepResult ? (
                 <>
-                  {tableRowsRanked.map((summary, index) => (
+                  {displayedPolicies.map((summary, index) => (
                     <SweepTableRow
                       key={summary.policyId}
                       rank={index + 1}
@@ -511,7 +561,8 @@ export function SweepReportPanel({
               ) : (
                 <tr>
                   <td colSpan={sweepTableColSpan} className="sweep-table-placeholder-cell">
-                    Fixed-rate (including Juxta 5.6) and adaptive policies appear here ranked by efficiency after you run a sweep.
+                    Fixed-rate (including the comparison baseline) and adaptive policies appear here after you run a sweep. Use column
+                    headers to sort.
                   </td>
                 </tr>
               )}
@@ -541,6 +592,43 @@ export function SweepReportPanel({
   );
 }
 
+function SweepSortableTh({
+  columnKey,
+  label,
+  hint,
+  activeKey,
+  dir,
+  onSort
+}: {
+  columnKey: SweepTableSortKey;
+  label: string;
+  hint: string;
+  activeKey: SweepTableSortKey;
+  dir: "asc" | "desc";
+  onSort: (key: SweepTableSortKey) => void;
+}) {
+  const active = activeKey === columnKey;
+  return (
+    <th
+      className="sweep-th-sortable"
+      scope="col"
+      tabIndex={0}
+      title={hint}
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
+      onClick={() => onSort(columnKey)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSort(columnKey);
+        }
+      }}
+    >
+      {label}
+      {active ? (dir === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
+}
+
 function SweepTableRow({
   rank,
   metricStyles,
@@ -560,9 +648,6 @@ function SweepTableRow({
 }) {
   const derived = sweepRowDerivedMetrics(summary, rawRows);
   const meanDrive = derived.meanDrive;
-  const pctBelow = derived.pctBelow;
-  const pctNear = derived.pctNear;
-  const pctAbove = derived.pctAbove;
   const cell = (column: SweepMetricColumn): CSSProperties | undefined => metricStyles?.[column];
 
   const canSimulate = Boolean(summary.params && onSimulatePolicy);
@@ -578,26 +663,32 @@ function SweepTableRow({
   const scanWin = p?.family === "fixed" ? p.scanWindowSeconds : "—";
   const advInt = p?.family === "fixed" ? p.advIntervalSeconds : "—";
 
+  const policyTip = policyHoverLabel(summary);
+
   return (
     <tr className={matchesBuilt ? "sweep-table-row-matches-built" : undefined}>
       <td style={cell("rank")}>{rank}</td>
-      <td>
-        <span className={badge.className} title={badge.title}>
-          {badge.letter}
+      <td className="sweep-alg-cell">
+        <span className="sweep-alg-hover" title={policyTip}>
+          <span className={badge.className} title={badge.title}>
+            {badge.letter}
+          </span>
+          <span
+            className={summary.isParetoEfficient ? "sweep-pareto-dot sweep-pareto-dot--yes" : "sweep-pareto-dot sweep-pareto-dot--no"}
+            title={summary.isParetoEfficient ? "Pareto-efficient (capture vs mAh/day)" : "Dominated by another policy"}
+            aria-label={summary.isParetoEfficient ? "Pareto-efficient" : "Not Pareto-efficient"}
+          />
+          {canSimulate ? (
+            <button
+              type="button"
+              className="sweep-policy-simulate-button"
+              disabled={simulateDisabled}
+              onClick={() => onSimulatePolicy?.(summary)}
+            >
+              Simulate
+            </button>
+          ) : null}
         </span>
-      </td>
-      <td className="sweep-policy-id" title={`${summary.policyId} — ${summary.label}`}>
-        <span className="sweep-policy-id-text">{summary.policyId}</span>
-        {canSimulate ? (
-          <button
-            type="button"
-            className="sweep-policy-simulate-button"
-            disabled={simulateDisabled}
-            onClick={() => onSimulatePolicy?.(summary)}
-          >
-            Simulate
-          </button>
-        ) : null}
       </td>
       <td style={cell("bd")}>{bd}</td>
       <td style={cell("mw")}>{mw}</td>
@@ -609,80 +700,123 @@ function SweepTableRow({
       <td style={cell("capture")}>{summary.meanCaptureRate.toFixed(4)}</td>
       <td style={cell("mAh")}>{summary.meanMahPerDay.toFixed(4)}</td>
       <td style={cell("efficiency")}>{summary.meanBleEfficiency.toFixed(4)}</td>
-      <td>{summary.isParetoEfficient ? "Yes" : "No"}</td>
-      <td style={cell("relCap")}>{summary.meanRelativeCapture.toFixed(3)}</td>
-      <td style={cell("relE")}>{summary.meanRelativeEnergy.toFixed(3)}</td>
       <td style={cell("meanDrive")}>{meanDrive != null ? meanDrive.toFixed(3) : "—"}</td>
-      <td style={cell("pctBelow")}>{pctBelow != null ? pctBelow.toFixed(1) : "—"}</td>
-      <td style={cell("pctNear")}>{pctNear != null ? pctNear.toFixed(1) : "—"}</td>
-      <td style={cell("pctAbove")}>{pctAbove != null ? pctAbove.toFixed(1) : "—"}</td>
     </tr>
   );
 }
 
-function SweepCandidatesSection({
+function SweepFixedAdaptiveComparisonTable({
+  baseline,
   candidates,
-  baseline
+  onSimulatePolicy,
+  simulateDisabled
 }: {
-  candidates: CandidatePick[];
   baseline: SweepPolicySummary;
+  candidates: CandidatePick[];
+  onSimulatePolicy?: (summary: SweepPolicySummary) => void;
+  simulateDisabled?: boolean;
 }) {
-  const titles: Record<CandidatePick["role"], string> = {
-    bestFixed: "Best fixed-rate (vs pool incl. Juxta 5.6)",
-    bestAdaptive: "Best adaptive"
+  const bestFixed = candidates.find((c) => c.role === "bestFixed")?.summary ?? null;
+  const bestAdaptive = candidates.find((c) => c.role === "bestAdaptive")?.summary ?? null;
+
+  const policyCell = (summary: SweepPolicySummary | null) => {
+    if (!summary) {
+      return (
+        <td className="sweep-comparison-cell">
+          <span className="sweep-comparison-empty">—</span>
+        </td>
+      );
+    }
+    const canSim = Boolean(summary.params && onSimulatePolicy);
+    return (
+      <td className="sweep-comparison-cell">
+        <div className="sweep-comparison-stack">
+          <code className="sweep-comparison-policy-id" title={policyHoverLabel(summary)}>
+            {summary.policyId}
+          </code>
+          {canSim ? (
+            <button
+              type="button"
+              className="sweep-policy-simulate-button"
+              disabled={simulateDisabled}
+              onClick={() => onSimulatePolicy?.(summary)}
+            >
+              Simulate
+            </button>
+          ) : null}
+        </div>
+      </td>
+    );
   };
 
+  const numCell = (summary: SweepPolicySummary | null, pick: (s: SweepPolicySummary) => number, decimals: number) => (
+    <td className="sweep-comparison-cell">{summary ? pick(summary).toFixed(decimals) : "—"}</td>
+  );
+
   return (
-    <section className="sweep-candidates">
-      <h3>Efficiency comparison</h3>
-      <p className="helper-text sweep-candidates-intro">
-        Highest mean BLE efficiency in each family. Fixed-rate sweep spans scan interval, scan window, and{" "}
-        <strong>advertise interval</strong> (2 s burst held constant). Metrics are relative to Juxta 5.6 ({baseline.policyId}
-        ).
-      </p>
-      <div className="sweep-candidate-cards sweep-candidate-cards--vs">
-        {candidates.map((pick) => (
-          <div key={pick.role} className="sweep-candidate-card">
-            <h4>{titles[pick.role]}</h4>
-            {!pick.summary ? (
-              <p className="helper-text">None selected.</p>
-            ) : (
-              <>
-                <p className="sweep-candidate-id">{pick.summary.policyId}</p>
-                <ul className="sweep-candidate-metrics">
-                  <li>Mean capture: {pick.summary.meanCaptureRate.toFixed(4)} (Juxta ref {baseline.meanCaptureRate.toFixed(4)})</li>
-                  <li>Relative capture: {pick.summary.meanRelativeCapture.toFixed(3)}</li>
-                  <li>Mean mAh/day: {pick.summary.meanMahPerDay.toFixed(4)}</li>
-                  <li>Efficiency (cap / mAh·day): {pick.summary.meanBleEfficiency.toFixed(4)}</li>
-                  <li>Threshold note: {pick.meetsThreshold ? "criteria met" : "see note below"}</li>
-                </ul>
-                {pick.note ? <p className="helper-text">{pick.note}</p> : null}
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="sweep-comparison-table-wrap">
+      <table className="sweep-comparison-table">
+        <thead>
+          <tr>
+            <th scope="col" className="sweep-comparison-corner" />
+            <th scope="col">Baseline</th>
+            <th scope="col">Best fixed</th>
+            <th scope="col">Best adaptive</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Policy</th>
+            {policyCell(baseline)}
+            {policyCell(bestFixed)}
+            {policyCell(bestAdaptive)}
+          </tr>
+          <tr>
+            <th scope="row">Capture</th>
+            {numCell(baseline, (s) => s.meanCaptureRate, 4)}
+            {numCell(bestFixed, (s) => s.meanCaptureRate, 4)}
+            {numCell(bestAdaptive, (s) => s.meanCaptureRate, 4)}
+          </tr>
+          <tr>
+            <th scope="row">mAh/day</th>
+            {numCell(baseline, (s) => s.meanMahPerDay, 4)}
+            {numCell(bestFixed, (s) => s.meanMahPerDay, 4)}
+            {numCell(bestAdaptive, (s) => s.meanMahPerDay, 4)}
+          </tr>
+          <tr>
+            <th scope="row">Efficiency</th>
+            {numCell(baseline, (s) => s.meanBleEfficiency, 4)}
+            {numCell(bestFixed, (s) => s.meanBleEfficiency, 4)}
+            {numCell(bestAdaptive, (s) => s.meanBleEfficiency, 4)}
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-const SWEEP_CANDIDATE_CARD_TITLES = ["Best fixed-rate", "Best adaptive"] as const;
-
-function SweepRecommendationsPlaceholder() {
+function SweepComparisonPlaceholder() {
   return (
-    <section className="sweep-candidates sweep-candidates--placeholder">
-      <h3>Top recommendations</h3>
-      <div className="sweep-candidate-cards">
-        {SWEEP_CANDIDATE_CARD_TITLES.map((title) => (
-          <div key={title} className="sweep-candidate-card sweep-candidate-card--placeholder">
-            <h4>{title}</h4>
-            <p className="helper-text sweep-placeholder-text">
-              Best fixed vs best adaptive (by efficiency) appear here after you run a sweep from the sidebar.
-            </p>
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="sweep-comparison-table-wrap sweep-comparison-table-wrap--placeholder">
+      <table className="sweep-comparison-table">
+        <thead>
+          <tr>
+            <th scope="col" className="sweep-comparison-corner" />
+            <th scope="col">Baseline</th>
+            <th scope="col">Best fixed</th>
+            <th scope="col">Best adaptive</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Policy</th>
+            <td colSpan={3} className="sweep-comparison-placeholder-note">
+              Run a sweep from the sidebar — baseline vs best fixed vs best adaptive (by mean efficiency) will appear here.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -733,7 +867,7 @@ function SweepPlotLegendHtml() {
       </span>
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--juxta" aria-hidden />
-        Juxta 5.6 reference
+        Comparison baseline
       </span>
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--built" aria-hidden />

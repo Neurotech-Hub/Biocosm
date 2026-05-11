@@ -47,7 +47,7 @@ function baselineSummary(): SweepPolicySummary {
     policyId: "baseline",
     kind: "baseline_fixed",
     label: "Juxta",
-    isJuxtaReference: true,
+      isComparisonBaseline: true,
     params: null,
     meanCaptureRate: 0.5,
     meanMahPerDay: 2,

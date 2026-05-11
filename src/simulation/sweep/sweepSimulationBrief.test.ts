@@ -11,8 +11,10 @@ describe("buildSweepSimulationBrief", () => {
     const byLabel = Object.fromEntries(rows.map((r) => [r.label, r.value]));
     expect(byLabel.Species).toContain("mouse");
     expect(byLabel.Seeds).toContain("99");
-    expect(byLabel.Seeds).toContain("Fast preview");
+    expect(byLabel.Seeds).toContain("Simulated Seed");
     expect(byLabel["Collar policy"]).toMatch(/Sweep substitutes/);
+    expect(byLabel["Comparison BLE baseline"]).toMatch(/General discovery/);
+    expect(byLabel["Hardware energy profile"]).toMatch(/Juxta/);
   });
 
   it("uses report seeds in report mode", () => {

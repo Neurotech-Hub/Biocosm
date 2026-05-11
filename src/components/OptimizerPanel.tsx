@@ -60,10 +60,13 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
   }
   if (summary.params.family === "fixed" && active.type === "fixed") {
     const p = summary.params;
+    const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
+    const burstA = active.advertisingBurstDurationSeconds ?? 2;
     return (
       nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
       nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
-      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds)
+      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
+      nearlyEqual(burstP, burstA)
     );
   }
   return false;
@@ -428,7 +431,10 @@ export function OptimizerPanel({
                   const verified = verifiedByRole.get(p.label);
                   const policySummary = c ? sweepSummaryForOptimizerCandidate(sweepResult, c) : null;
                   const canSimulate = Boolean(
-                    c && onSimulateRecommendation && policySummary && firmwarePolicyFromSweepSummary(policySummary)
+                    c &&
+                      onSimulateRecommendation &&
+                      policySummary &&
+                      firmwarePolicyFromSweepSummary(policySummary, baseConfig)
                   );
                   return (
                     <tr key={p.role}>

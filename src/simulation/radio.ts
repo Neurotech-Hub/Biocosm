@@ -17,8 +17,6 @@ export const SCAN_LISTEN_INTERVAL_SECONDS = 0.05;
 export const SCAN_LISTEN_WINDOW_SECONDS = 0.0125;
 /** Default spacing of synthetic advertising events; keep aligned with `EnergyConfig.advertisingEventIntervalSeconds`. */
 export const DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS = 0.15;
-/** @deprecated Use DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS or config. */
-export const ADVERTISING_PACKET_INTERVAL_SECONDS = DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS;
 
 export function computeTrueContacts(animals: Animal[], radio: RadioConfig, time: number): TrueContact[] {
   const contacts: TrueContact[] = [];

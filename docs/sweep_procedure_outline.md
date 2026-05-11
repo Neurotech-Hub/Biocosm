@@ -15,7 +15,7 @@ A sweep compares **fixed-rate BLE schedules** (including the **Juxta 5.6** refer
 | Input | Role |
 |--------|------|
 | **Built simulation config** | Animals, enclosure, radio, length, timestep, species preset, etc. Trials override only `seed`, `activePolicy`, and (implicitly) derived simulation state. |
-| **Sweep mode: Fast vs Report** | **Fast:** one seed — the built config’s `seed` string. **Report:** three fixed seeds `101`, `202`, `303` ([`SWEEP_REPORT_SEEDS`](../src/simulation/sweep/adaptiveBleSweep.ts)). |
+| **Sweep mode: Fast vs Report** | **Fast:** one seed — the built config’s `seed` string. **Report:** seeds from [`reportSeedsForCount`](../src/simulation/sweep/adaptiveBleSweep.ts) (default first three of `SWEEP_REPORT_SEED_POOL`: `101`, `202`, `303`). |
 | **`VITE_SWEEP_FULL_GRID`** | Build-time flag. **`true`** → larger Cartesian grids for both fixed and adaptive axes; **default / absent** → **quick** grids for interactive iteration. |
 
 Trial count: **`sweepTrialCount(mode)`** = `(fixed policies + adaptive policies) × number of seeds` for that mode.
@@ -86,7 +86,7 @@ Literals below match **[`adaptiveBleSweep.ts`](../src/simulation/sweep/adaptiveB
 
 ### 3.3 Adaptive timing anchors (shared by all adaptive trials)
 
-These define low / neutral / high schedule shapes; not Cartesian-multiplied themselves (`ADAPTIVE_SWEEP_TIMING_ANCHORS`):
+These define low / neutral / high schedule shapes; not Cartesian-multiplied themselves (from [`buildAdaptiveAnchorsFromBaseline`](../src/simulation/blePolicyPresets.ts) / [`bleBaselinePresetDefForSweep`](../src/simulation/blePolicyPresets.ts) for the active Simulator preset):
 
 | Tier | Scan interval (s) | Scan window (s) | Advertise interval (s) |
 |------|-------------------|-------------------|-------------------------|
@@ -203,7 +203,7 @@ Implemented primarily in [`SweepReportPanel.tsx`](../src/components/SweepReportP
 | **Quick** (default) | 27 | 54 | **81** | **81** | **243** |
 | **Full** (`VITE_SWEEP_FULL_GRID=true`) | 100 | 90 | **190** | **190** | **570** |
 
-Report seeds are always **`101`, `202`, `303`** ([`SWEEP_REPORT_SEEDS`](../src/simulation/sweep/adaptiveBleSweep.ts)). Fast mode uses the built simulator seed once.
+Report mode uses the first *N* entries of **`SWEEP_REPORT_SEED_POOL`** via **`reportSeedsForCount(N)`** (default *N* = 3 → `101`, `202`, `303`). Fast mode uses the built simulator seed once.
 
 Authoritative counts: `fixedSweepPolicyCount()`, `adaptiveSweepPolicyCount()`, `policiesPerSweepSeed()`, `sweepTrialCount(mode)` in code.
 

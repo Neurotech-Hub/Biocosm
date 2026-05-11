@@ -83,7 +83,7 @@ export async function verifyOptimizerCandidates(
       verifiedMahPerDay = cached.mAhPerDay;
       verifiedBleEfficiency = cached.bleEfficiency;
     } else {
-      const policy = firmwarePolicyFromSweepSummary(sweepSummary);
+      const policy = firmwarePolicyFromSweepSummary(sweepSummary, builtConfig);
       if (!policy) {
         completed += 1;
         options.onProgress?.(completed, total);

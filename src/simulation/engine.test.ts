@@ -508,12 +508,12 @@ describe("simulation engine", () => {
     expect(neutral.scanIntervalSeconds).toBeCloseTo(20);
     expect(neutral.scanWindowSeconds).toBeCloseTo(1.5);
     expect(neutral.advIntervalSeconds).toBeCloseTo(5);
-    expect(low.scanIntervalSeconds).toBeGreaterThan(20);
-    expect(low.scanWindowSeconds).toBeLessThan(1.5);
-    expect(low.advIntervalSeconds).toBeGreaterThan(5);
-    expect(high.scanIntervalSeconds).toBeLessThan(20);
-    expect(high.scanWindowSeconds).toBeGreaterThan(1.5);
-    expect(high.advIntervalSeconds).toBeLessThan(5);
+    expect(low.scanIntervalSeconds).toBeGreaterThan(neutral.scanIntervalSeconds);
+    expect(low.scanWindowSeconds).toBeLessThan(neutral.scanWindowSeconds);
+    expect(low.advIntervalSeconds).toBeGreaterThan(neutral.advIntervalSeconds);
+    expect(high.scanIntervalSeconds).toBeLessThan(neutral.scanIntervalSeconds);
+    expect(high.scanWindowSeconds).toBeGreaterThan(neutral.scanWindowSeconds);
+    expect(high.advIntervalSeconds).toBeLessThan(neutral.advIntervalSeconds);
   });
 
   it("increases adaptive motion drive and sampling drive from motion", () => {

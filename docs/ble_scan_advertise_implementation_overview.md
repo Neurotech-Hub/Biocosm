@@ -54,7 +54,7 @@ Constants in [`radio.ts`](../src/simulation/radio.ts):
 |---------|-------|------|
 | `SCAN_LISTEN_INTERVAL_SECONDS` | 0.05 | spacing of scan sub-windows inside a scan burst |
 | `SCAN_LISTEN_WINDOW_SECONDS` | 0.0125 | duration of each listen window |
-| `DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS` | 0.15 | spacing of synthetic ad packets; must match `EnergyConfig.advertisingEventIntervalSeconds` (`ADVERTISING_PACKET_INTERVAL_SECONDS` is a deprecated alias) |
+| `DEFAULT_ADVERTISING_EVENT_INTERVAL_SECONDS` | 0.15 | spacing of synthetic ad packets; must match `EnergyConfig.advertisingEventIntervalSeconds` |
 | `bleScheduling.interBurstDelaySeconds` | 0.1 (default) | gap after a burst before the next scheduling step |
 
 - **Scan:** each `scan` burst is expanded into many short `ScanWindowEvent`s via `createScanListenWindows` (not the whole burst treated as one continuous receiver-on interval at full duty cycle—listen is piecewise).

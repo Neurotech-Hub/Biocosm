@@ -13,7 +13,7 @@ function baselineRatios(baseline: SweepPolicySummary): {
   return { capture: cap, energy: en, efficiency: eff };
 }
 
-/** Discrete fixed-policy candidates from sweep bundle (Juxta baseline + fixed_sweep rows). */
+/** Discrete fixed-policy candidates from sweep bundle (comparison baseline + fixed_sweep rows). */
 export function sweepFixedSummariesToCandidates(
   baselineSummary: SweepPolicySummary,
   summaries: SweepPolicySummary[]

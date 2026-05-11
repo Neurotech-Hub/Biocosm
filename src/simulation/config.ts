@@ -1,30 +1,20 @@
+import {
+  blePolicyPresets,
+  buildAdaptiveAnchorsFromBaseline,
+  DEFAULT_BLE_POLICY_PRESET_ID,
+  fixedPolicyFromPreset
+} from "./blePolicyPresets";
+import {
+  DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
+  energyConfigFromHardwareProfileId,
+  juxtaV56EnergyPreset
+} from "./hardwareEnergyProfiles";
 import { DEFAULT_SPECIES_PRESET_ID } from "./speciesPresets";
 import { defaultSpeciesModifiers } from "./speciesModifiers";
-import type { BleSchedulingConfig, EnergyConfig, FixedPolicyConfig, SimulationConfig } from "./types";
+import type { BleSchedulingConfig, FixedPolicyConfig, SimulationConfig } from "./types";
 
-/** Juxta v5/6 social-mode energy back-fit (see agent/juxta_ble_energy_model_mismatch_feedback.md). */
-export const juxtaV56EnergyPreset: Pick<
-  EnergyConfig,
-  | "baselineCurrentMicroAmps"
-  | "rxCurrentMa1MPhy"
-  | "advertisingEventIntervalSeconds"
-  | "advEventChargeMicroCoulombs"
-  | "energyModel"
-  | "measuredSocial5s20sTotalMicroAmps"
-  | "componentBleActivityScale"
-> = {
-  baselineCurrentMicroAmps: 78,
-  rxCurrentMa1MPhy: 6.4,
-  advertisingEventIntervalSeconds: 0.15,
-  advEventChargeMicroCoulombs: 13,
-  energyModel: "component",
-  measuredSocial5s20sTotalMicroAmps: 233.09,
-  /**
-   * Scales scan + advertising mAh (not baseline). Corrects event-scheduled duty vs datasheet long-run average
-   * (safe zones, jitter, serial scan/adv) after baseline uses µA·s → mAh consistently.
-   */
-  componentBleActivityScale: 1.134
-};
+/** Re-export for docs and callers that imported from config. */
+export { juxtaV56EnergyPreset };
 
 export const defaultBleScheduling: BleSchedulingConfig = {
   interBurstDelaySeconds: 0.1,
@@ -45,10 +35,37 @@ export const juxtaMainCMode0FixedPolicy: FixedPolicyConfig = {
   advertisingBurstDurationSeconds: 2
 };
 
+const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
+
+/** Default fixed policy: General discovery (asymmetric proximity baseline). */
+export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(generalDiscoveryPreset);
+
+const defaultAdaptiveAnchors = buildAdaptiveAnchorsFromBaseline(generalDiscoveryPreset);
+
+export const defaultAdaptivePolicy = {
+  id: "motion-peer-adaptive",
+  type: "motion_peer_adaptive",
+  name: "Motion + peer adaptive BLE",
+  timingAnchors: defaultAdaptiveAnchors,
+  baselineDrive: 0.25,
+  tauMotionSeconds: 180,
+  tauPeerSeconds: 900,
+  motionGain: 0.35,
+  peerGain: 0.45,
+  peerMissPenalty: 0.2,
+  motionWeight: 0.45,
+  peerWeight: 0.55,
+  peerDetectionCountSaturation: 1,
+  motionEventCountSaturation: 1,
+  allowEnergySavingDownscale: true
+} as const;
+
 export const defaultSimulationConfig: SimulationConfig = {
   seed: "42",
   speciesPresetId: DEFAULT_SPECIES_PRESET_ID,
   speciesModifiers: defaultSpeciesModifiers,
+  blePolicyPresetId: DEFAULT_BLE_POLICY_PRESET_ID,
+  hardwareEnergyProfileId: DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
   startTimeSeconds: 6 * 60 * 60,
   simulationLengthSeconds: 24 * 60 * 60,
   timeStepSeconds: 60,
@@ -90,14 +107,9 @@ export const defaultSimulationConfig: SimulationConfig = {
     rssiThreshold: -85,
     rssiSlope: 4
   },
-  energy: {
-    batteryCapacityMah: 40,
-    startingVoltage: 4.2,
-    txPowerDbm: 8,
-    ...juxtaV56EnergyPreset
-  },
+  energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  activePolicy: { ...juxtaMainCMode0FixedPolicy }
+  activePolicy: { ...defaultAdaptivePolicy }
 };
 
 /** Datasheet Social Mode average draw (Adv 5 s / Scan 20 s), µA — use with `milliampHoursFromMeanMicroAmps`. */
@@ -107,38 +119,3 @@ export const JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS = 233.09 as const;
 export function milliampHoursFromMeanMicroAmps(meanMicroAmps: number, hours: number): number {
   return (meanMicroAmps / 1000) * hours;
 }
-
-export const defaultAdaptivePolicy = {
-  id: "motion-peer-adaptive",
-  type: "motion_peer_adaptive",
-  name: "Motion + peer adaptive BLE",
-  timingAnchors: {
-    lowIntensity: {
-      scanIntervalSeconds: 60,
-      scanWindowSeconds: 0.5,
-      advIntervalSeconds: 20
-    },
-    neutral: {
-      scanIntervalSeconds: juxtaMainCMode0FixedPolicy.scanIntervalSeconds,
-      scanWindowSeconds: juxtaMainCMode0FixedPolicy.scanWindowSeconds,
-      advIntervalSeconds: juxtaMainCMode0FixedPolicy.advIntervalSeconds
-    },
-    highIntensity: {
-      scanIntervalSeconds: 5,
-      scanWindowSeconds: 3,
-      advIntervalSeconds: 1
-    },
-    advertisingBurstDurationSeconds: juxtaMainCMode0FixedPolicy.advertisingBurstDurationSeconds ?? 2
-  },
-  baselineDrive: 0.25,
-  tauMotionSeconds: 180,
-  tauPeerSeconds: 900,
-  motionGain: 0.35,
-  peerGain: 0.45,
-  peerMissPenalty: 0.2,
-  motionWeight: 0.45,
-  peerWeight: 0.55,
-  peerDetectionCountSaturation: 1,
-  motionEventCountSaturation: 1,
-  allowEnergySavingDownscale: true
-} as const;

@@ -236,6 +236,10 @@ export type SimulationConfig = {
   speciesPresetId: string;
   speciesModifiers: SpeciesModifierConfig;
   advancedSpeciesOverrides?: AdvancedSpeciesOverrides;
+  /** Catalog id for comparison BLE baseline schedules (`general-discovery`, `symmetric-example`, `juxta-v56-social`, or `custom`). */
+  blePolicyPresetId: string;
+  /** Hardware energy profile id (`juxta-v56`, `generic-nrf52840`). */
+  hardwareEnergyProfileId: string;
   startTimeSeconds: number;
   simulationLengthSeconds: number;
   timeStepSeconds: number;

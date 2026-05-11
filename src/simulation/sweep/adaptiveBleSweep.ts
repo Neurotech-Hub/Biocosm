@@ -1,5 +1,15 @@
+import {
+  baselineFixedPolicyForSweep,
+  bleBaselinePresetDefForSweep,
+  blePolicyPresetIdForFixedPolicy,
+  BLE_POLICY_CUSTOM_ID,
+  buildAdaptiveAnchorsFromBaseline,
+  getBlePolicyPreset,
+  referenceDiscoveryBlePreset,
+  sweepBaselinePolicyId
+} from "../blePolicyPresets";
 import { computeMetrics } from "../analysis";
-import { juxtaMainCMode0FixedPolicy } from "../config";
+import { defaultSimulationConfig } from "../config";
 import { mergeLogs, runSimulationToEnd, stepSimulation } from "../engine";
 import type {
   FirmwarePolicyConfig,
@@ -22,26 +32,6 @@ import {
   type SweepPolicySummary
 } from "./sweepCandidates";
 
-/** Spec §5 — first-pass sweep timing anchors (differs slightly from defaultAdaptivePolicy low/high). */
-export const ADAPTIVE_SWEEP_TIMING_ANCHORS: MotionPeerAdaptivePolicyConfig["timingAnchors"] = {
-  lowIntensity: {
-    scanIntervalSeconds: 60,
-    scanWindowSeconds: 0.75,
-    advIntervalSeconds: 15
-  },
-  neutral: {
-    scanIntervalSeconds: 20,
-    scanWindowSeconds: 1.5,
-    advIntervalSeconds: 5
-  },
-  highIntensity: {
-    scanIntervalSeconds: 5,
-    scanWindowSeconds: 3,
-    advIntervalSeconds: 1.5
-  },
-  advertisingBurstDurationSeconds: 2
-};
-
 /** Spec §7 held constants for sweep runs. */
 export const SWEEP_HELD_ADAPTIVE = {
   tauMotionSeconds: 120,
@@ -54,7 +44,7 @@ export const SWEEP_HELD_ADAPTIVE = {
 } as const;
 
 /**
- * Full exploratory grid — brackets Juxta-neutral: low-duty savings, mid, and aggressive upscale (5×3×3×2 = **90** per seed).
+ * Full exploratory grid — low-duty savings, mid, and aggressive upscale (5×3×3×2 = **90** per seed).
  * Enable at build time with `VITE_SWEEP_FULL_GRID=true` (see sweep settings info popover in the UI).
  */
 export const SWEEP_FULL_BASELINE_DRIVES = [0.08, 0.2, 0.32, 0.42, 0.5] as const;
@@ -63,8 +53,7 @@ export const SWEEP_FULL_PEER_WEIGHTS = [0.25, 0.5, 0.85] as const;
 export const SWEEP_FULL_TAU_PEER_SECONDS = [120, 600] as const;
 
 /**
- * Quick grid — same 3×2×2×2 = **24** cells: includes both energy-down and capture-up corners vs fixed Juxta.
- * (Prior revision skewed all weights low, clustering adaptives southwest of baseline on capture vs mAh.)
+ * Quick grid — 3×2×3×3 = **54** adaptives: energy-down and capture-up corners vs the selected comparison baseline.
  */
 export const SWEEP_QUICK_BASELINE_DRIVES = [0.12, 0.28, 0.45] as const;
 export const SWEEP_QUICK_MOTION_WEIGHTS = [0.22, 0.5] as const;
@@ -72,25 +61,20 @@ export const SWEEP_QUICK_PEER_WEIGHTS = [0.35, 0.6, 0.85] as const;
 export const SWEEP_QUICK_TAU_PEER_SECONDS = [120, 300, 600] as const;
 
 /**
- * Fixed-rate sweep: **scan interval × advertise interval × scan window**; `advertisingBurstDurationSeconds` held at 2 s.
- * Juxta 5.6 (20s scan / 1.5s window / 5s **advertise interval**) is always in the grid.
+ * Minimal grid — 2×2×2×2 = **16** adaptives for fast smoke tests (subset of quick corner axes).
  */
-export const SWEEP_FIXED_BURST_SECONDS = 2 as const;
-export const SWEEP_QUICK_FIXED_SCAN_INTERVALS = [10, 20, 40] as const;
-export const SWEEP_QUICK_FIXED_ADV_INTERVALS = [5, 10, 15] as const;
-export const SWEEP_QUICK_FIXED_SCAN_WINDOWS = [1.0, 1.5, 2.5] as const;
-
-export const SWEEP_FULL_FIXED_SCAN_INTERVALS = [5, 10, 15, 20, 30] as const;
-export const SWEEP_FULL_FIXED_ADV_INTERVALS = [5, 10, 15, 20] as const;
-export const SWEEP_FULL_FIXED_SCAN_WINDOWS = [0.5, 1.0, 1.5, 2.0, 2.5] as const;
+export const SWEEP_MINIMAL_BASELINE_DRIVES = [0.12, 0.45] as const;
+export const SWEEP_MINIMAL_MOTION_WEIGHTS = [0.22, 0.5] as const;
+export const SWEEP_MINIMAL_PEER_WEIGHTS = [0.35, 0.85] as const;
+export const SWEEP_MINIMAL_TAU_PEER_SECONDS = [120, 600] as const;
 
 /** When true, uses the full exploratory grid; otherwise the quick testing grid (default). */
 export function isFullSweepGrid(): boolean {
   return import.meta.env.VITE_SWEEP_FULL_GRID === "true";
 }
 
-/** Quick vs full Cartesian grids (same shapes as build-flag quick/full). */
-export type SweepGridVariant = "quick" | "full";
+/** Quick vs full Cartesian grids (same shapes as build-flag quick/full); minimal is a tiny subset for smoke tests. */
+export type SweepGridVariant = "minimal" | "quick" | "full";
 
 export function defaultSweepGridVariant(): SweepGridVariant {
   return isFullSweepGrid() ? "full" : "quick";
@@ -113,19 +97,102 @@ export type FixedSweepAxes = {
   scanWindows: readonly number[];
 };
 
-export function getFixedSweepAxes(variant?: SweepGridVariant): FixedSweepAxes {
-  const v = resolveGridVariant(variant);
-  if (v === "full") {
-    return {
-      scanIntervals: SWEEP_FULL_FIXED_SCAN_INTERVALS,
-      advIntervals: SWEEP_FULL_FIXED_ADV_INTERVALS,
-      scanWindows: SWEEP_FULL_FIXED_SCAN_WINDOWS
-    };
+function roundIntervalSeconds(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) {
+    return 1;
   }
+  return Math.max(1, Math.round(v * 100) / 100);
+}
+
+function roundWindowSeconds(v: number): number {
+  if (!Number.isFinite(v) || v <= 0) {
+    return 0.5;
+  }
+  return Math.max(0.5, Math.round(v * 100) / 100);
+}
+
+function uniqueSorted(values: number[]): number[] {
+  return [...new Set(values.filter((x) => Number.isFinite(x)))].sort((a, b) => a - b);
+}
+
+/** Full fixed-rate sweep: baseline multipliers for scan and advertise intervals. */
+const SWEEP_FULL_INTERVAL_MULTIPLIERS = [0.25, 0.5, 1, 2, 4] as const;
+
+/** Full fixed-rate sweep: baseline multipliers for scan windows. */
+const SWEEP_FULL_WINDOW_MULTIPLIERS = [0.25, 0.5, 1, 1.5, 2] as const;
+
+/**
+ * Quick fixed sweep uses the same min/max multiplier range as full, with fewer equally spaced
+ * multipliers (linear spacing on the ratio axis) so tuning spans the same duty envelope.
+ */
+const SWEEP_QUICK_FIXED_AXIS_POINT_COUNT = 3;
+const SWEEP_MINIMAL_FIXED_AXIS_POINT_COUNT = 2;
+
+function linspaceInclusive(min: number, max: number, count: number): number[] {
+  if (count < 2) {
+    return [min];
+  }
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    out.push(min + ((max - min) * i) / (count - 1));
+  }
+  return out;
+}
+
+function quickFixedIntervalMultipliers(): number[] {
+  const lo = SWEEP_FULL_INTERVAL_MULTIPLIERS[0];
+  const hi = SWEEP_FULL_INTERVAL_MULTIPLIERS[SWEEP_FULL_INTERVAL_MULTIPLIERS.length - 1]!;
+  return linspaceInclusive(lo, hi, SWEEP_QUICK_FIXED_AXIS_POINT_COUNT);
+}
+
+function quickFixedWindowMultipliers(): number[] {
+  const lo = SWEEP_FULL_WINDOW_MULTIPLIERS[0];
+  const hi = SWEEP_FULL_WINDOW_MULTIPLIERS[SWEEP_FULL_WINDOW_MULTIPLIERS.length - 1]!;
+  return linspaceInclusive(lo, hi, SWEEP_QUICK_FIXED_AXIS_POINT_COUNT);
+}
+
+function minimalFixedIntervalMultipliers(): number[] {
+  const lo = SWEEP_FULL_INTERVAL_MULTIPLIERS[0];
+  const hi = SWEEP_FULL_INTERVAL_MULTIPLIERS[SWEEP_FULL_INTERVAL_MULTIPLIERS.length - 1]!;
+  return linspaceInclusive(lo, hi, SWEEP_MINIMAL_FIXED_AXIS_POINT_COUNT);
+}
+
+function minimalFixedWindowMultipliers(): number[] {
+  const lo = SWEEP_FULL_WINDOW_MULTIPLIERS[0];
+  const hi = SWEEP_FULL_WINDOW_MULTIPLIERS[SWEEP_FULL_WINDOW_MULTIPLIERS.length - 1]!;
+  return linspaceInclusive(lo, hi, SWEEP_MINIMAL_FIXED_AXIS_POINT_COUNT);
+}
+
+/** Spec §9 — fixed-rate Cartesian axes bracket the selected BLE baseline schedule. */
+export function getFixedSweepAxes(variant: SweepGridVariant | undefined, baseline: FixedPolicyConfig): FixedSweepAxes {
+  const v = resolveGridVariant(variant);
+  const intervalMults =
+    v === "full"
+      ? SWEEP_FULL_INTERVAL_MULTIPLIERS
+      : v === "minimal"
+        ? minimalFixedIntervalMultipliers()
+        : quickFixedIntervalMultipliers();
+  const windowMults =
+    v === "full"
+      ? SWEEP_FULL_WINDOW_MULTIPLIERS
+      : v === "minimal"
+        ? minimalFixedWindowMultipliers()
+        : quickFixedWindowMultipliers();
+  const bracketed: FixedSweepAxes = {
+    scanIntervals: uniqueSorted(
+      intervalMults.map((m) => roundIntervalSeconds(baseline.scanIntervalSeconds * m))
+    ),
+    advIntervals: uniqueSorted(
+      intervalMults.map((m) => roundIntervalSeconds(baseline.advIntervalSeconds * m))
+    ),
+    scanWindows: uniqueSorted(windowMults.map((m) => roundWindowSeconds(baseline.scanWindowSeconds * m)))
+  };
+  /** Always include canonical asymmetric discovery triple (20 / 1.5 / 5) so symmetric baselines still explore it. */
+  const ref = referenceDiscoveryBlePreset();
   return {
-    scanIntervals: SWEEP_QUICK_FIXED_SCAN_INTERVALS,
-    advIntervals: SWEEP_QUICK_FIXED_ADV_INTERVALS,
-    scanWindows: SWEEP_QUICK_FIXED_SCAN_WINDOWS
+    scanIntervals: uniqueSorted([...bracketed.scanIntervals, ref.scanIntervalSeconds]),
+    advIntervals: uniqueSorted([...bracketed.advIntervals, ref.advIntervalSeconds]),
+    scanWindows: uniqueSorted([...bracketed.scanWindows, ref.scanWindowSeconds])
   };
 }
 
@@ -139,6 +206,14 @@ export function getSweepAxes(variant?: SweepGridVariant): SweepAxes {
       tauPeerSeconds: SWEEP_FULL_TAU_PEER_SECONDS
     };
   }
+  if (v === "minimal") {
+    return {
+      baselineDrives: SWEEP_MINIMAL_BASELINE_DRIVES,
+      motionWeights: SWEEP_MINIMAL_MOTION_WEIGHTS,
+      peerWeights: SWEEP_MINIMAL_PEER_WEIGHTS,
+      tauPeerSeconds: SWEEP_MINIMAL_TAU_PEER_SECONDS
+    };
+  }
   return {
     baselineDrives: SWEEP_QUICK_BASELINE_DRIVES,
     motionWeights: SWEEP_QUICK_MOTION_WEIGHTS,
@@ -147,7 +222,7 @@ export function getSweepAxes(variant?: SweepGridVariant): SweepAxes {
   };
 }
 
-/** Number of adaptive policies in the active grid (54 quick, 90 full). */
+/** Number of adaptive policies in the active grid (16 minimal, 54 quick, 90 full). */
 export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   const axes = getSweepAxes(variant);
   return (
@@ -158,15 +233,16 @@ export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   );
 }
 
-/** Number of fixed-rate policies per seed (includes Juxta 5.6 as baseline reference). */
-export function fixedSweepPolicyCount(variant?: SweepGridVariant): number {
-  const ax = getFixedSweepAxes(variant);
+/** Number of fixed-rate policies per seed (includes one comparison baseline row). */
+export function fixedSweepPolicyCount(variant?: SweepGridVariant, baseline?: FixedPolicyConfig): number {
+  const b = baseline ?? baselineFixedPolicyForSweep(defaultSimulationConfig);
+  const ax = getFixedSweepAxes(variant, b);
   return ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindows.length;
 }
 
 /** Policies per seed: full fixed grid + adaptive grid. */
-export function policiesPerSweepSeed(variant?: SweepGridVariant): number {
-  return fixedSweepPolicyCount(variant) + adaptiveSweepPolicyCount(variant);
+export function policiesPerSweepSeed(variant?: SweepGridVariant, baseline?: FixedPolicyConfig): number {
+  return fixedSweepPolicyCount(variant, baseline) + adaptiveSweepPolicyCount(variant);
 }
 
 /** Pool for report mode; first N used when report seed count is N (1–5). */
@@ -180,26 +256,29 @@ export function reportSeedsForCount(count: number): string[] {
   return Array.from(SWEEP_REPORT_SEED_POOL.slice(0, n));
 }
 
-/** @deprecated Use reportSeedsForCount(DEFAULT_REPORT_SEED_COUNT); kept for callers expecting three seeds. */
-export const SWEEP_REPORT_SEEDS = ["101", "202", "303"] as const;
-
 export type BuildSweepTrialsOptions = {
   gridVariant?: SweepGridVariant;
   /** Report mode only; default 3 (101, 202, 303). */
   reportSeedCount?: number;
+  /** Drives baseline-relative fixed grid and adaptive anchors (defaults to General discovery). */
+  simulationConfig?: SimulationConfig;
 };
+
+function baselineFixedForSweepOptions(options?: BuildSweepTrialsOptions): FixedPolicyConfig {
+  return baselineFixedPolicyForSweep(options?.simulationConfig ?? defaultSimulationConfig);
+}
 
 /** Total simulation runs (fixed + adaptive trials) for the selected seeds and grid. */
 export function sweepTrialCount(mode: "fast" | "report", options?: BuildSweepTrialsOptions): number {
   const variant = resolveGridVariant(options?.gridVariant);
-  const perSeed = policiesPerSweepSeed(variant);
+  const baseline = baselineFixedForSweepOptions(options);
+  const perSeed = policiesPerSweepSeed(variant, baseline);
   const seedRows =
     mode === "fast"
       ? 1
       : reportSeedsForCount(options?.reportSeedCount ?? DEFAULT_REPORT_SEED_COUNT).length;
   return seedRows * perSeed;
 }
-export const SWEEP_BASELINE_POLICY_ID = "sweep-baseline-juxta-fixed";
 
 export type SweepPolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
 
@@ -218,6 +297,7 @@ export type SweepRawRow = {
   scheduledScanIntervalSeconds: number | null;
   scheduledScanWindowSeconds: number | null;
   scheduledAdvIntervalSeconds: number | null;
+  scheduledAdvertisingBurstDurationSeconds: number | null;
   baselineDrive: number | null;
   motionWeight: number | null;
   peerWeight: number | null;
@@ -259,7 +339,8 @@ export function sweepAdaptivePolicyFromGrid(
   baselineDrive: number,
   motionWeight: number,
   peerWeight: number,
-  tauPeerSeconds: number
+  tauPeerSeconds: number,
+  timingAnchors: MotionPeerAdaptivePolicyConfig["timingAnchors"]
 ): MotionPeerAdaptivePolicyConfig {
   const id = `sweep-adaptive-bd${baselineDrive}-mw${motionWeight}-pw${peerWeight}-tau${tauPeerSeconds}`;
   return {
@@ -267,10 +348,10 @@ export function sweepAdaptivePolicyFromGrid(
     type: "motion_peer_adaptive",
     name: "Adaptive sweep trial",
     timingAnchors: {
-      lowIntensity: { ...ADAPTIVE_SWEEP_TIMING_ANCHORS.lowIntensity },
-      neutral: { ...ADAPTIVE_SWEEP_TIMING_ANCHORS.neutral },
-      highIntensity: { ...ADAPTIVE_SWEEP_TIMING_ANCHORS.highIntensity },
-      advertisingBurstDurationSeconds: ADAPTIVE_SWEEP_TIMING_ANCHORS.advertisingBurstDurationSeconds
+      lowIntensity: { ...timingAnchors.lowIntensity },
+      neutral: { ...timingAnchors.neutral },
+      highIntensity: { ...timingAnchors.highIntensity },
+      advertisingBurstDurationSeconds: timingAnchors.advertisingBurstDurationSeconds
     },
     baselineDrive,
     motionWeight,
@@ -280,14 +361,19 @@ export function sweepAdaptivePolicyFromGrid(
   };
 }
 
-export function buildSweepGridPolicies(variant?: SweepGridVariant): MotionPeerAdaptivePolicyConfig[] {
+export function buildSweepGridPolicies(
+  variant: SweepGridVariant | undefined,
+  timingAnchors: MotionPeerAdaptivePolicyConfig["timingAnchors"]
+): MotionPeerAdaptivePolicyConfig[] {
   const axes = getSweepAxes(variant);
   const policies: MotionPeerAdaptivePolicyConfig[] = [];
   for (const baselineDrive of axes.baselineDrives) {
     for (const motionWeight of axes.motionWeights) {
       for (const peerWeight of axes.peerWeights) {
         for (const tauPeerSeconds of axes.tauPeerSeconds) {
-          policies.push(sweepAdaptivePolicyFromGrid(baselineDrive, motionWeight, peerWeight, tauPeerSeconds));
+          policies.push(
+            sweepAdaptivePolicyFromGrid(baselineDrive, motionWeight, peerWeight, tauPeerSeconds, timingAnchors)
+          );
         }
       }
     }
@@ -295,34 +381,50 @@ export function buildSweepGridPolicies(variant?: SweepGridVariant): MotionPeerAd
   return policies;
 }
 
-function isJuxta56Schedule(
+function schedulesMatchBaseline(
   scanIntervalSeconds: number,
   advIntervalSeconds: number,
-  scanWindowSeconds: number
+  scanWindowSeconds: number,
+  burstSeconds: number,
+  baseline: FixedPolicyConfig
 ): boolean {
+  const baseBurst = baseline.advertisingBurstDurationSeconds ?? 2;
   return (
-    scanIntervalSeconds === juxtaMainCMode0FixedPolicy.scanIntervalSeconds &&
-    advIntervalSeconds === juxtaMainCMode0FixedPolicy.advIntervalSeconds &&
-    scanWindowSeconds === juxtaMainCMode0FixedPolicy.scanWindowSeconds
+    scanIntervalSeconds === baseline.scanIntervalSeconds &&
+    advIntervalSeconds === baseline.advIntervalSeconds &&
+    scanWindowSeconds === baseline.scanWindowSeconds &&
+    burstSeconds === baseBurst
   );
 }
 
-/** One entry per fixed-rate combo in the active grid; Juxta 5.6 is tagged `baseline_fixed`. */
-export function buildFixedSweepTrialDefs(variant?: SweepGridVariant): Omit<SweepTrial, "seed">[] {
-  const axes = getFixedSweepAxes(variant);
+/** One entry per fixed-rate combo; the schedule matching the selected baseline is tagged `baseline_fixed`. */
+export function buildFixedSweepTrialDefs(
+  variant: SweepGridVariant | undefined,
+  simulationConfig: SimulationConfig
+): Omit<SweepTrial, "seed">[] {
+  const baselineFixed = baselineFixedPolicyForSweep(simulationConfig);
+  const burstSeconds = baselineFixed.advertisingBurstDurationSeconds ?? 2;
+  const baselinePolicyId = sweepBaselinePolicyId(simulationConfig.blePolicyPresetId);
+  const presetLabel =
+    simulationConfig.blePolicyPresetId !== BLE_POLICY_CUSTOM_ID
+      ? getBlePolicyPreset(simulationConfig.blePolicyPresetId)?.label ?? simulationConfig.blePolicyPresetId
+      : "Custom";
+  const axes = getFixedSweepAxes(variant, baselineFixed);
   const trials: Omit<SweepTrial, "seed">[] = [];
   for (const scanIntervalSeconds of axes.scanIntervals) {
     for (const advIntervalSeconds of axes.advIntervals) {
       for (const scanWindowSeconds of axes.scanWindows) {
-        if (isJuxta56Schedule(scanIntervalSeconds, advIntervalSeconds, scanWindowSeconds)) {
+        if (
+          schedulesMatchBaseline(scanIntervalSeconds, advIntervalSeconds, scanWindowSeconds, burstSeconds, baselineFixed)
+        ) {
           const policy: FixedPolicyConfig = {
-            ...juxtaMainCMode0FixedPolicy,
-            id: SWEEP_BASELINE_POLICY_ID,
-            name: "Juxta 5.6 (reference)",
-            advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+            ...baselineFixed,
+            id: baselinePolicyId,
+            name: `Baseline: ${presetLabel}`,
+            advertisingBurstDurationSeconds: burstSeconds
           };
           trials.push({
-            policyId: SWEEP_BASELINE_POLICY_ID,
+            policyId: baselinePolicyId,
             kind: "baseline_fixed",
             policy
           });
@@ -335,7 +437,7 @@ export function buildFixedSweepTrialDefs(variant?: SweepGridVariant): Omit<Sweep
             scanIntervalSeconds,
             scanWindowSeconds,
             advIntervalSeconds,
-            advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+            advertisingBurstDurationSeconds: burstSeconds
           };
           trials.push({
             policyId,
@@ -366,11 +468,14 @@ export function buildSweepTrials(
   options?: BuildSweepTrialsOptions
 ): SweepTrial[] {
   const variant = resolveGridVariant(options?.gridVariant);
+  const simConfig = options?.simulationConfig ?? defaultSimulationConfig;
+  const presetDef = bleBaselinePresetDefForSweep(simConfig);
+  const timingAnchors = buildAdaptiveAnchorsFromBaseline(presetDef);
   const seeds = seedsForSweepMode(mode, currentSeed, {
     reportSeedCount: options?.reportSeedCount
   });
-  const adaptivePolicies = buildSweepGridPolicies(variant);
-  const fixedTrialDefs = buildFixedSweepTrialDefs(variant);
+  const adaptivePolicies = buildSweepGridPolicies(variant, timingAnchors);
+  const fixedTrialDefs = buildFixedSweepTrialDefs(variant, simConfig);
 
   const trials: SweepTrial[] = [];
   for (const seed of seeds) {
@@ -400,6 +505,7 @@ export function sweepExecutionSummary(input: {
   mode: "fast" | "report";
   builtSeed: string;
   reportSeedCount?: number;
+  simulationConfig?: SimulationConfig;
 }): {
   variant: SweepGridVariant;
   adaptiveAxes: SweepAxes;
@@ -409,18 +515,21 @@ export function sweepExecutionSummary(input: {
   totalTrials: number;
 } {
   const variant = resolveGridVariant(input.gridVariant);
-  const policiesPerSeed = policiesPerSweepSeed(variant);
+  const simConfig = input.simulationConfig ?? defaultSimulationConfig;
+  const baseline = baselineFixedPolicyForSweep(simConfig);
+  const policiesPerSeed = policiesPerSweepSeed(variant, baseline);
   const simulationSeeds = seedsForSweepMode(input.mode, input.builtSeed, {
     reportSeedCount: input.reportSeedCount
   });
   const totalTrials = sweepTrialCount(input.mode, {
     gridVariant: input.gridVariant,
-    reportSeedCount: input.reportSeedCount
+    reportSeedCount: input.reportSeedCount,
+    simulationConfig: simConfig
   });
   return {
     variant,
     adaptiveAxes: getSweepAxes(variant),
-    fixedAxes: getFixedSweepAxes(variant),
+    fixedAxes: getFixedSweepAxes(variant, baseline),
     policiesPerSeed,
     simulationSeeds,
     totalTrials
@@ -459,6 +568,8 @@ export function computeSweepRowFromRun(
     scheduledScanIntervalSeconds: fixed?.scanIntervalSeconds ?? null,
     scheduledScanWindowSeconds: fixed?.scanWindowSeconds ?? null,
     scheduledAdvIntervalSeconds: fixed?.advIntervalSeconds ?? null,
+    scheduledAdvertisingBurstDurationSeconds:
+      fixed?.advertisingBurstDurationSeconds ?? null,
     baselineDrive: adaptive?.baselineDrive ?? null,
     motionWeight: adaptive?.motionWeight ?? null,
     peerWeight: adaptive?.peerWeight ?? null,
@@ -561,7 +672,8 @@ function buildSummaryParams(rows: SweepRawRow[], kind: SweepPolicyKind): SweepPo
       family: "fixed",
       scanIntervalSeconds: r.scheduledScanIntervalSeconds,
       scanWindowSeconds: r.scheduledScanWindowSeconds,
-      advIntervalSeconds: r.scheduledAdvIntervalSeconds
+      advIntervalSeconds: r.scheduledAdvIntervalSeconds,
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? undefined
     };
   }
   return null;
@@ -570,7 +682,19 @@ function buildSummaryParams(rows: SweepRawRow[], kind: SweepPolicyKind): SweepPo
 function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string {
   const r = rows[0]!;
   if (kind === "baseline_fixed") {
-    return "Juxta 5.6 (reference)";
+    const pseudo: FixedPolicyConfig = {
+      type: "fixed",
+      id: "summary-baseline",
+      name: "baseline",
+      scanIntervalSeconds: r.scheduledScanIntervalSeconds ?? 0,
+      scanWindowSeconds: r.scheduledScanWindowSeconds ?? 0,
+      advIntervalSeconds: r.scheduledAdvIntervalSeconds ?? 0,
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? 2
+    };
+    const pid = blePolicyPresetIdForFixedPolicy(pseudo);
+    const label =
+      pid !== BLE_POLICY_CUSTOM_ID ? getBlePolicyPreset(pid)?.label ?? pid : "Custom";
+    return `Baseline: ${label}`;
   }
   if (kind === "fixed_sweep") {
     const s = r.scheduledScanIntervalSeconds ?? "?";
@@ -608,7 +732,7 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
     const summary: SweepPolicySummary = {
       policyId,
       kind: policyKind,
-      isJuxtaReference: kind === "baseline_fixed",
+      isComparisonBaseline: kind === "baseline_fixed",
       label: summaryLabelForKind(kind, rows),
       params: buildSummaryParams(rows, kind),
       meanCaptureRate: captureRates.reduce((a, b) => a + b, 0) / captureRates.length,
@@ -636,16 +760,11 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
 
   if (!baselineSummary) {
     baselineSummary = {
-      policyId: SWEEP_BASELINE_POLICY_ID,
+      policyId: "sweep-baseline-missing",
       kind: "baseline_fixed",
-      label: "Juxta 5.6 (reference)",
-      isJuxtaReference: true,
-      params: {
-        family: "fixed",
-        scanIntervalSeconds: juxtaMainCMode0FixedPolicy.scanIntervalSeconds,
-        scanWindowSeconds: juxtaMainCMode0FixedPolicy.scanWindowSeconds,
-        advIntervalSeconds: juxtaMainCMode0FixedPolicy.advIntervalSeconds
-      },
+      label: "Comparison baseline (missing)",
+      isComparisonBaseline: true,
+      params: null,
       meanCaptureRate: 0,
       meanMahPerDay: 0,
       meanBleEfficiency: 0,
@@ -687,16 +806,28 @@ export function finalizeSweepBundle(
 }
 
 /** Build an active policy config for loading a sweep row into the Simulator. */
-export function firmwarePolicyFromSweepSummary(summary: SweepPolicySummary): FirmwarePolicyConfig | null {
+export function firmwarePolicyFromSweepSummary(
+  summary: SweepPolicySummary,
+  sweepBaseConfig?: SimulationConfig
+): FirmwarePolicyConfig | null {
   if (!summary.params) {
     return null;
   }
   if (summary.params.family === "adaptive") {
     const p = summary.params;
-    const built = sweepAdaptivePolicyFromGrid(p.baselineDrive, p.motionWeight, p.peerWeight, p.tauPeerSeconds);
+    const presetDef = bleBaselinePresetDefForSweep(sweepBaseConfig ?? defaultSimulationConfig);
+    const anchors = buildAdaptiveAnchorsFromBaseline(presetDef);
+    const built = sweepAdaptivePolicyFromGrid(
+      p.baselineDrive,
+      p.motionWeight,
+      p.peerWeight,
+      p.tauPeerSeconds,
+      anchors
+    );
     return { ...built, id: summary.policyId, name: summary.label };
   }
   const p = summary.params;
+  const burst = p.advertisingBurstDurationSeconds ?? 2;
   return {
     type: "fixed",
     id: summary.policyId,
@@ -704,7 +835,7 @@ export function firmwarePolicyFromSweepSummary(summary: SweepPolicySummary): Fir
     scanIntervalSeconds: p.scanIntervalSeconds,
     scanWindowSeconds: p.scanWindowSeconds,
     advIntervalSeconds: p.advIntervalSeconds,
-    advertisingBurstDurationSeconds: SWEEP_FIXED_BURST_SECONDS
+    advertisingBurstDurationSeconds: burst
   };
 }
 
