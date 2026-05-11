@@ -40,6 +40,18 @@ const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
 /** Default fixed policy: General discovery (asymmetric proximity baseline). */
 export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(generalDiscoveryPreset);
 
+/** Device / BLE panel defaults: periodic scan, frequent advertising, double intervals when motion-inactive. */
+export const defaultSimulatorFixedBlePolicy: FixedPolicyConfig = {
+  type: "fixed",
+  id: "sim-default-fixed-proximity",
+  name: "Default fixed proximity (simulator)",
+  scanIntervalSeconds: 5,
+  scanWindowSeconds: 0.5,
+  advIntervalSeconds: 1.25,
+  advertisingBurstDurationSeconds: 2,
+  doubleWhenInactive: true
+};
+
 const defaultAdaptiveAnchors = buildAdaptiveAnchorsFromBaseline(generalDiscoveryPreset);
 
 export const defaultAdaptivePolicy = {
@@ -109,7 +121,7 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  activePolicy: { ...defaultAdaptivePolicy }
+  activePolicy: { ...defaultSimulatorFixedBlePolicy }
 };
 
 /** Datasheet Social Mode average draw (Adv 5 s / Scan 20 s), µA — use with `milliampHoursFromMeanMicroAmps`. */

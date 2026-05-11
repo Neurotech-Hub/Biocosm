@@ -6,12 +6,15 @@ export function applyFixedRatePolicy(
   animal: Animal,
   policy: FixedPolicyConfig,
   timeSeconds: number,
-  dtSeconds: number
+  dtSeconds: number,
+  /** When false and policy.doubleWhenInactive, scan/adv intervals are doubled for this epoch. Defaults true when caller omits motion. */
+  motionDetected = true
 ): Animal {
   void timeSeconds;
   void dtSeconds;
   const advertisingBurstDurationSeconds =
     policy.advertisingBurstDurationSeconds ?? DEFAULT_ADVERTISING_BURST_DURATION_SECONDS;
+  const inactive = policy.doubleWhenInactive === true && !motionDetected;
 
   return {
     ...animal,
@@ -19,9 +22,9 @@ export function applyFixedRatePolicy(
       ...animal.collar,
       scanActive: false,
       advActive: false,
-      scanIntervalSeconds: policy.scanIntervalSeconds,
+      scanIntervalSeconds: inactive ? policy.scanIntervalSeconds * 2 : policy.scanIntervalSeconds,
       scanWindowSeconds: policy.scanWindowSeconds,
-      advIntervalSeconds: policy.advIntervalSeconds,
+      advIntervalSeconds: inactive ? policy.advIntervalSeconds * 2 : policy.advIntervalSeconds,
       advertisingBurstDurationSeconds
     }
   };

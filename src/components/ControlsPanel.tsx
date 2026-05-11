@@ -678,6 +678,24 @@ export function ControlsPanel({
               }
             />
           </label>
+
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={fixedPolicy.doubleWhenInactive === true}
+              onChange={(event) =>
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  doubleWhenInactive: event.target.checked ? true : undefined
+                })
+              }
+            />
+            Double scan/adv when inactive
+          </label>
+          <p className="helper-text">
+            When enabled, scan and advertising intervals double for any epoch where the collar motion sensor reports no motion
+            (quasi-adaptive on top of fixed-rate schedules).
+          </p>
         </>
         ) : adaptivePolicy ? (
         <>

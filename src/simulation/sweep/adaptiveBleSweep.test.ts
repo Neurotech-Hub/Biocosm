@@ -71,9 +71,9 @@ describe("adaptive BLE sweep", () => {
     expect(fullProduct).toBe(90);
     expect(quickProduct).toBe(54);
 
-    expect(fixedSweepPolicyCount("quick")).toBe(64);
+    expect(fixedSweepPolicyCount("quick")).toBe(128);
     expect(adaptiveSweepPolicyCount("quick")).toBe(quickProduct);
-    expect(policiesPerSweepSeed("quick")).toBe(64 + quickProduct);
+    expect(policiesPerSweepSeed("quick")).toBe(128 + quickProduct);
     expect(buildSweepGridPolicies("quick", quickSweepAnchors)).toHaveLength(quickProduct);
     expect(buildSweepTrials("fast", "42", { gridVariant: "quick" })).toHaveLength(
       sweepTrialCount("fast", { gridVariant: "quick" })
@@ -81,9 +81,9 @@ describe("adaptive BLE sweep", () => {
     expect(buildSweepTrials("report", "42", { gridVariant: "quick", reportSeedCount: 3 })).toHaveLength(
       sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })
     );
-    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(118);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(354);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(590);
+    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(182);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(546);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(910);
   });
 
   it("minimal grid: 2-point fixed axes + 2×2×2×2 adaptives for fast smoke tests", () => {
@@ -93,12 +93,12 @@ describe("adaptive BLE sweep", () => {
       SWEEP_MINIMAL_PEER_WEIGHTS.length *
       SWEEP_MINIMAL_TAU_PEER_SECONDS.length;
     expect(minimalProduct).toBe(16);
-    expect(fixedSweepPolicyCount("minimal")).toBe(27);
+    expect(fixedSweepPolicyCount("minimal")).toBe(54);
     expect(adaptiveSweepPolicyCount("minimal")).toBe(16);
-    expect(policiesPerSweepSeed("minimal")).toBe(43);
-    expect(sweepTrialCount("fast", { gridVariant: "minimal" })).toBe(43);
-    expect(buildSweepTrials("fast", "42", { gridVariant: "minimal" })).toHaveLength(43);
-    expect(sweepTrialCount("report", { gridVariant: "minimal", reportSeedCount: 3 })).toBe(129);
+    expect(policiesPerSweepSeed("minimal")).toBe(70);
+    expect(sweepTrialCount("fast", { gridVariant: "minimal" })).toBe(70);
+    expect(buildSweepTrials("fast", "42", { gridVariant: "minimal" })).toHaveLength(70);
+    expect(sweepTrialCount("report", { gridVariant: "minimal", reportSeedCount: 3 })).toBe(210);
   });
 
   it("quick grid includes low-duty and upscale corners (brackets neutral anchor on drive)", () => {
@@ -113,6 +113,7 @@ describe("adaptive BLE sweep", () => {
       policyId: sweepBaselinePolicyId("general-discovery"),
       kind: "baseline_fixed",
       seed: "101",
+      doubleWhenInactive: false,
       scheduledScanIntervalSeconds: 20,
       scheduledScanWindowSeconds: 1.5,
       scheduledAdvIntervalSeconds: 5,
@@ -282,9 +283,14 @@ describe("adaptive BLE sweep", () => {
           t.policy.advIntervalSeconds === 5
       )
     ).toBe(true);
-    expect(fixedSweepPolicyCount("quick", baselineFixedPolicyForSweep(cfg))).toBe(64);
-    expect(policiesPerSweepSeed("quick", baselineFixedPolicyForSweep(cfg))).toBe(118);
-    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: cfg })).toBe(118);
+    expect(fixedSweepPolicyCount("quick", baselineFixedPolicyForSweep(cfg))).toBe(128);
+    expect(policiesPerSweepSeed("quick", baselineFixedPolicyForSweep(cfg))).toBe(182);
+    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: cfg })).toBe(182);
+    const dd = trials.find(
+      (t) => t.policyId.endsWith("-dd") && t.kind === "fixed_sweep_inactivity_double"
+    );
+    expect(dd?.policy.type).toBe("fixed");
+    expect(dd != null && dd.policy.type === "fixed" && dd.policy.doubleWhenInactive === true).toBe(true);
   });
 });
 

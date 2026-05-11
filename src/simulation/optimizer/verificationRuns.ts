@@ -23,7 +23,8 @@ function verifyCacheKey(summary: SweepPolicySummary): string {
     return summary.policyId;
   }
   if (p.family === "fixed") {
-    return `fixed:${p.scanIntervalSeconds}|${p.scanWindowSeconds}|${p.advIntervalSeconds}`;
+    const dd = p.doubleWhenInactive === true ? "|dd" : "";
+    return `fixed:${p.scanIntervalSeconds}|${p.scanWindowSeconds}|${p.advIntervalSeconds}${dd}`;
   }
   return `adaptive:${p.baselineDrive}|${p.motionWeight}|${p.peerWeight}|${p.tauPeerSeconds}`;
 }

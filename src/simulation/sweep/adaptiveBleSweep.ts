@@ -17,8 +17,11 @@ import type {
   MotionPeerAdaptivePolicyConfig,
   SimulationConfig,
   SimulationLogs,
-  SimulationState
+  SimulationState,
+  SweepPolicyKind
 } from "../types";
+
+export type { SweepPolicyKind } from "../types";
 import { createInitialSimulation } from "../world";
 import {
   computeMeanCollarTimingsFromTimeline,
@@ -233,11 +236,11 @@ export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   );
 }
 
-/** Number of fixed-rate policies per seed (includes one comparison baseline row). */
+/** Number of fixed-rate policies per seed (base + paired inactivity-double row per Cartesian combo). */
 export function fixedSweepPolicyCount(variant?: SweepGridVariant, baseline?: FixedPolicyConfig): number {
   const b = baseline ?? baselineFixedPolicyForSweep(defaultSimulationConfig);
   const ax = getFixedSweepAxes(variant, b);
-  return ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindows.length;
+  return 2 * (ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindows.length);
 }
 
 /** Policies per seed: full fixed grid + adaptive grid. */
@@ -280,8 +283,6 @@ export function sweepTrialCount(mode: "fast" | "report", options?: BuildSweepTri
   return seedRows * perSeed;
 }
 
-export type SweepPolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
-
 export type SweepTrial = {
   policyId: string;
   kind: SweepPolicyKind;
@@ -293,6 +294,8 @@ export type SweepRawRow = {
   policyId: string;
   kind: SweepPolicyKind;
   seed: string;
+  /** Fixed policies only: doubles scan/adv intervals when inactive. */
+  doubleWhenInactive: boolean;
   /** Configured schedule for fixed policies; null for adaptive. */
   scheduledScanIntervalSeconds: number | null;
   scheduledScanWindowSeconds: number | null;
@@ -411,6 +414,28 @@ export function buildFixedSweepTrialDefs(
       : "Custom";
   const axes = getFixedSweepAxes(variant, baselineFixed);
   const trials: Omit<SweepTrial, "seed">[] = [];
+
+  const pushBaseAndInactivityDouble = (
+    basePolicyId: string,
+    kind: "baseline_fixed" | "fixed_sweep",
+    policy: FixedPolicyConfig
+  ) => {
+    trials.push({ policyId: basePolicyId, kind, policy });
+    const ddPolicyId = `${basePolicyId}-dd`;
+    const ddPolicy: FixedPolicyConfig = {
+      ...policy,
+      id: ddPolicyId,
+      doubleWhenInactive: true,
+      name:
+        kind === "baseline_fixed"
+          ? `Baseline (inactive ×2): ${presetLabel}`
+          : `${policy.name} — inactive ×2`
+    };
+    const ddKind: SweepPolicyKind =
+      kind === "baseline_fixed" ? "baseline_fixed_inactivity_double" : "fixed_sweep_inactivity_double";
+    trials.push({ policyId: ddPolicyId, kind: ddKind, policy: ddPolicy });
+  };
+
   for (const scanIntervalSeconds of axes.scanIntervals) {
     for (const advIntervalSeconds of axes.advIntervals) {
       for (const scanWindowSeconds of axes.scanWindows) {
@@ -423,11 +448,7 @@ export function buildFixedSweepTrialDefs(
             name: `Baseline: ${presetLabel}`,
             advertisingBurstDurationSeconds: burstSeconds
           };
-          trials.push({
-            policyId: baselinePolicyId,
-            kind: "baseline_fixed",
-            policy
-          });
+          pushBaseAndInactivityDouble(baselinePolicyId, "baseline_fixed", policy);
         } else {
           const policyId = `sweep-fixed-s${scanIntervalSeconds}-a${advIntervalSeconds}-w${scanWindowSeconds}`;
           const policy: FixedPolicyConfig = {
@@ -439,11 +460,7 @@ export function buildFixedSweepTrialDefs(
             advIntervalSeconds,
             advertisingBurstDurationSeconds: burstSeconds
           };
-          trials.push({
-            policyId,
-            kind: "fixed_sweep",
-            policy
-          });
+          pushBaseAndInactivityDouble(policyId, "fixed_sweep", policy);
         }
       }
     }
@@ -565,6 +582,7 @@ export function computeSweepRowFromRun(
     policyId: trial.policyId,
     kind: trial.kind,
     seed: trial.seed,
+    doubleWhenInactive: fixed?.doubleWhenInactive === true,
     scheduledScanIntervalSeconds: fixed?.scanIntervalSeconds ?? null,
     scheduledScanWindowSeconds: fixed?.scanWindowSeconds ?? null,
     scheduledAdvIntervalSeconds: fixed?.advIntervalSeconds ?? null,
@@ -660,7 +678,12 @@ function buildSummaryParams(rows: SweepRawRow[], kind: SweepPolicyKind): SweepPo
       tauPeerSeconds: r.tauPeerSeconds
     };
   }
-  if (kind === "baseline_fixed" || kind === "fixed_sweep") {
+  if (
+    kind === "baseline_fixed" ||
+    kind === "baseline_fixed_inactivity_double" ||
+    kind === "fixed_sweep" ||
+    kind === "fixed_sweep_inactivity_double"
+  ) {
     if (
       r.scheduledScanIntervalSeconds == null ||
       r.scheduledScanWindowSeconds == null ||
@@ -673,7 +696,9 @@ function buildSummaryParams(rows: SweepRawRow[], kind: SweepPolicyKind): SweepPo
       scanIntervalSeconds: r.scheduledScanIntervalSeconds,
       scanWindowSeconds: r.scheduledScanWindowSeconds,
       advIntervalSeconds: r.scheduledAdvIntervalSeconds,
-      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? undefined
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? undefined,
+      doubleWhenInactive:
+        kind === "baseline_fixed_inactivity_double" || kind === "fixed_sweep_inactivity_double" ? true : undefined
     };
   }
   return null;
@@ -702,6 +727,26 @@ function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string
     const a = r.scheduledAdvIntervalSeconds ?? "?";
     return `Fixed ${s}s scan / ${w}s win / ${a}s adv`;
   }
+  if (kind === "baseline_fixed_inactivity_double") {
+    const pid = blePolicyPresetIdForFixedPolicy({
+      type: "fixed",
+      id: "summary-baseline-dd",
+      name: "baseline-dd",
+      scanIntervalSeconds: r.scheduledScanIntervalSeconds ?? 0,
+      scanWindowSeconds: r.scheduledScanWindowSeconds ?? 0,
+      advIntervalSeconds: r.scheduledAdvIntervalSeconds ?? 0,
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? 2
+    });
+    const label =
+      pid !== BLE_POLICY_CUSTOM_ID ? getBlePolicyPreset(pid)?.label ?? pid : "Custom";
+    return `Baseline (inactive ×2): ${label}`;
+  }
+  if (kind === "fixed_sweep_inactivity_double") {
+    const s = r.scheduledScanIntervalSeconds ?? "?";
+    const w = r.scheduledScanWindowSeconds ?? "?";
+    const a = r.scheduledAdvIntervalSeconds ?? "?";
+    return `Fixed ${s}s scan / ${w}s win / ${a}s adv — inactive ×2`;
+  }
   return `bd=${r.baselineDrive} mw=${r.motionWeight} pw=${r.peerWeight} τp=${r.tauPeerSeconds}s`;
 }
 
@@ -727,7 +772,15 @@ export function aggregateSweepRows(rawRows: SweepRawRow[]): {
 
     const captureRates = rows.map((row) => row.captureRate);
     const policyKind: SweepPolicySummary["kind"] =
-      kind === "baseline_fixed" ? "baseline_fixed" : kind === "fixed_sweep" ? "fixed_sweep" : "adaptive";
+      kind === "baseline_fixed"
+        ? "baseline_fixed"
+        : kind === "baseline_fixed_inactivity_double"
+          ? "baseline_fixed_inactivity_double"
+          : kind === "fixed_sweep"
+            ? "fixed_sweep"
+            : kind === "fixed_sweep_inactivity_double"
+              ? "fixed_sweep_inactivity_double"
+              : "adaptive";
 
     const summary: SweepPolicySummary = {
       policyId,
@@ -828,7 +881,7 @@ export function firmwarePolicyFromSweepSummary(
   }
   const p = summary.params;
   const burst = p.advertisingBurstDurationSeconds ?? 2;
-  return {
+  const fixed: FixedPolicyConfig = {
     type: "fixed",
     id: summary.policyId,
     name: summary.label,
@@ -837,6 +890,10 @@ export function firmwarePolicyFromSweepSummary(
     advIntervalSeconds: p.advIntervalSeconds,
     advertisingBurstDurationSeconds: burst
   };
+  if (p.doubleWhenInactive === true) {
+    fixed.doubleWhenInactive = true;
+  }
+  return fixed;
 }
 
 export function runSingleSweepTrialSync(baseConfig: SimulationConfig, trial: SweepTrial): SweepRawRow {

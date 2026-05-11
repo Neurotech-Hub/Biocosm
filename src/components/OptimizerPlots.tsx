@@ -12,7 +12,7 @@ export type OptimizerScatterObserved = {
   y: number;
   id: string;
   tooltip: string;
-  variant: "adaptive" | "fixed_sweep";
+  variant: "adaptive" | "fixed_sweep" | "fixed_inactivity_double";
   highlight: boolean;
   pareto: boolean;
 };
@@ -152,6 +152,7 @@ export function OptimizerCaptureEnergyPlot({
           const cx = sx(point.x);
           const cy = sy(point.y);
           const fill = point.variant === "adaptive" ? "#7dd3fc" : "#fbbf24";
+          const isInactiveDouble = point.variant === "fixed_inactivity_double";
           return (
             <g key={point.id}>
               <title>{point.tooltip}</title>
@@ -161,7 +162,11 @@ export function OptimizerCaptureEnergyPlot({
               {point.highlight ? (
                 <circle cx={cx} cy={cy} r={11} fill="none" stroke="#a78bfa" strokeWidth={2} />
               ) : null}
-              <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
+              {isInactiveDouble ? (
+                <circle cx={cx} cy={cy} r={5.5} fill="none" stroke={fill} strokeWidth={2} opacity={0.95} />
+              ) : (
+                <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
+              )}
             </g>
           );
         })}

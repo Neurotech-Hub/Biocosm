@@ -26,7 +26,7 @@ export function applyFirmwarePolicy(
   dtSeconds: number
 ): Animal {
   if (policy.type === "fixed") {
-    return applyFixedRatePolicy(animal, policy, timeSeconds, dtSeconds);
+    return applyFixedRatePolicy(animal, policy, timeSeconds, dtSeconds, observation.motionDetected);
   }
 
   return applyMotionPeerAdaptivePolicy(

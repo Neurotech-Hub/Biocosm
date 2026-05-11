@@ -43,11 +43,14 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
     const p = summary.params;
     const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
     const burstA = active.advertisingBurstDurationSeconds ?? 2;
+    const pInactive = p.doubleWhenInactive === true;
+    const aInactive = active.doubleWhenInactive === true;
     return (
       nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
       nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
       nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
-      nearlyEqual(burstP, burstA)
+      nearlyEqual(burstP, burstA) &&
+      pInactive === aInactive
     );
   }
   return false;
@@ -81,6 +84,20 @@ function algBadge(summary: SweepPolicySummary): { letter: string; title: string;
   if (summary.isComparisonBaseline || summary.kind === "baseline_fixed") {
     return { letter: "B", title: "Comparison baseline (fixed)", className: "sweep-alg sweep-alg-juxta" };
   }
+  if (summary.kind === "baseline_fixed_inactivity_double") {
+    return {
+      letter: "D",
+      title: "Baseline schedule with inactive ×2 scan/adv",
+      className: "sweep-alg sweep-alg-fixed-dd"
+    };
+  }
+  if (summary.kind === "fixed_sweep_inactivity_double") {
+    return {
+      letter: "D",
+      title: "Fixed-rate sweep with inactive ×2 scan/adv",
+      className: "sweep-alg sweep-alg-fixed-dd"
+    };
+  }
   if (summary.kind === "fixed_sweep") {
     return { letter: "F", title: "Fixed-rate BLE", className: "sweep-alg sweep-alg-fixed" };
   }
@@ -92,7 +109,7 @@ type ScatterPoint = {
   y: number;
   id: string;
   tooltip: string;
-  variant: "adaptive" | "fixed_sweep";
+  variant: "adaptive" | "fixed_sweep" | "fixed_inactivity_double";
   highlight: boolean;
   /** Non-dominated on mean capture vs mean mAh/day (same as summary CSV). */
   pareto: boolean;
@@ -373,15 +390,26 @@ export function SweepReportPanel({
   };
 
   const captureVsEnergyPoints = useMemo((): ScatterPoint[] => {
-    return summariesByEfficiency.map((summary) => ({
-      x: summary.meanMahPerDay,
-      y: summary.meanCaptureRate,
-      id: summary.policyId,
-      tooltip: policyHoverLabel(summary),
-      variant: summary.kind === "adaptive" ? "adaptive" : "fixed_sweep",
-      highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
-      pareto: summary.isParetoEfficient
-    }));
+    return summariesByEfficiency.map((summary) => {
+      let variant: ScatterPoint["variant"] = "fixed_sweep";
+      if (summary.kind === "adaptive") {
+        variant = "adaptive";
+      } else if (
+        summary.kind === "fixed_sweep_inactivity_double" ||
+        summary.kind === "baseline_fixed_inactivity_double"
+      ) {
+        variant = "fixed_inactivity_double";
+      }
+      return {
+        x: summary.meanMahPerDay,
+        y: summary.meanCaptureRate,
+        id: summary.policyId,
+        tooltip: policyHoverLabel(summary),
+        variant,
+        highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
+        pareto: summary.isParetoEfficient
+      };
+    });
   }, [summariesByEfficiency, baseConfig]);
 
   const downloadRawCsv = () => {
@@ -756,6 +784,12 @@ function SweepFixedAdaptiveComparisonTable({
   return (
     <div className="sweep-comparison-table-wrap">
       <table className="sweep-comparison-table">
+        <colgroup>
+          <col className="sweep-comparison-col-corner" />
+          <col className="sweep-comparison-col-data" />
+          <col className="sweep-comparison-col-data" />
+          <col className="sweep-comparison-col-data" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col" className="sweep-comparison-corner" />
@@ -799,6 +833,12 @@ function SweepComparisonPlaceholder() {
   return (
     <div className="sweep-comparison-table-wrap sweep-comparison-table-wrap--placeholder">
       <table className="sweep-comparison-table">
+        <colgroup>
+          <col className="sweep-comparison-col-corner" />
+          <col className="sweep-comparison-col-data" />
+          <col className="sweep-comparison-col-data" />
+          <col className="sweep-comparison-col-data" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col" className="sweep-comparison-corner" />
@@ -860,6 +900,10 @@ function SweepPlotLegendHtml() {
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--fixed" aria-hidden />
         Fixed-rate sweep
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive" aria-hidden />
+        Fixed inactive ×2 (hollow)
       </span>
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--adaptive" aria-hidden />
@@ -948,6 +992,7 @@ function SweepScatterPlot({
           const cx = sx(point.x);
           const cy = sy(point.y);
           const fill = point.variant === "adaptive" ? "#7dd3fc" : "#fbbf24";
+          const isInactiveDouble = point.variant === "fixed_inactivity_double";
           return (
             <g key={point.id}>
               <title>{point.tooltip}</title>
@@ -957,7 +1002,11 @@ function SweepScatterPlot({
               {point.highlight ? (
                 <circle cx={cx} cy={cy} r={11} fill="none" stroke="#a78bfa" strokeWidth={2} />
               ) : null}
-              <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
+              {isInactiveDouble ? (
+                <circle cx={cx} cy={cy} r={5.5} fill="none" stroke={fill} strokeWidth={2} opacity={0.95} />
+              ) : (
+                <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
+              )}
             </g>
           );
         })}

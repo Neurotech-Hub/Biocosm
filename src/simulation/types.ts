@@ -196,7 +196,17 @@ export type FixedPolicyConfig = {
   advIntervalSeconds: number;
   /** On-air advertising burst length (firmware ADV_BURST_DURATION_MS / 1000). Default 2 s if omitted. */
   advertisingBurstDurationSeconds?: number;
+  /** When true, scan and advertising intervals double for epochs where motion is not detected (fixed-rate quasi-adaptive). */
+  doubleWhenInactive?: boolean;
 };
+
+/** BLE sweep trial policy category (baseline vs grid vs adaptive; inactivity-double pairs each fixed-rate row). */
+export type SweepPolicyKind =
+  | "baseline_fixed"
+  | "fixed_sweep"
+  | "baseline_fixed_inactivity_double"
+  | "fixed_sweep_inactivity_double"
+  | "adaptive";
 
 export type AdaptiveBleTiming = {
   scanIntervalSeconds: number;

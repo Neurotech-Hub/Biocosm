@@ -1,4 +1,6 @@
-export type PolicyKind = "baseline_fixed" | "fixed_sweep" | "adaptive";
+import type { SweepPolicyKind } from "../types";
+
+export type PolicyKind = SweepPolicyKind;
 
 /** Discriminated params for Simulate / exports (Juxta baseline uses family fixed). */
 export type SweepPolicyParams =
@@ -15,6 +17,8 @@ export type SweepPolicyParams =
       scanWindowSeconds: number;
       advIntervalSeconds: number;
       advertisingBurstDurationSeconds?: number;
+      /** When true, same nominal schedule as inactive-double sweep row. */
+      doubleWhenInactive?: boolean;
     };
 
 export type SweepPolicySummary = {
@@ -113,9 +117,14 @@ export function pickSweepCandidates(
   baselineCaptureRate: number
 ): CandidatePick[] {
   const adaptive = summaries.filter((row) => row.kind === "adaptive");
-  const fixedSweep = summaries.filter((row) => row.kind === "fixed_sweep");
+  const fixedExtras = summaries.filter(
+    (row) =>
+      row.kind === "fixed_sweep" ||
+      row.kind === "fixed_sweep_inactivity_double" ||
+      row.kind === "baseline_fixed_inactivity_double"
+  );
 
-  const fixedPool: SweepPolicySummary[] = [baselineSummary, ...fixedSweep];
+  const fixedPool: SweepPolicySummary[] = [baselineSummary, ...fixedExtras];
   const bestFixed = bestByEfficiency(fixedPool);
 
   const eligibleAdaptive = adaptive.filter((row) => row.meanCaptureRate >= MIN_CAPTURE_FRAC * baselineCaptureRate);

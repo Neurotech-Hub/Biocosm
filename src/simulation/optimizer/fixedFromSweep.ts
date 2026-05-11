@@ -13,7 +13,7 @@ function baselineRatios(baseline: SweepPolicySummary): {
   return { capture: cap, energy: en, efficiency: eff };
 }
 
-/** Discrete fixed-policy candidates from sweep bundle (comparison baseline + fixed_sweep rows). */
+/** Discrete fixed-policy candidates from sweep bundle (comparison baseline + fixed grid + inactive-double variants). */
 export function sweepFixedSummariesToCandidates(
   baselineSummary: SweepPolicySummary,
   summaries: SweepPolicySummary[]
@@ -24,7 +24,11 @@ export function sweepFixedSummariesToCandidates(
     fixedSummaries.push(baselineSummary);
   }
   for (const s of summaries) {
-    if (s.kind === "fixed_sweep") {
+    if (
+      s.kind === "fixed_sweep" ||
+      s.kind === "fixed_sweep_inactivity_double" ||
+      s.kind === "baseline_fixed_inactivity_double"
+    ) {
       fixedSummaries.push(s);
     }
   }

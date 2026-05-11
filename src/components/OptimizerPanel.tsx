@@ -62,11 +62,14 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
     const p = summary.params;
     const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
     const burstA = active.advertisingBurstDurationSeconds ?? 2;
+    const pInactive = p.doubleWhenInactive === true;
+    const aInactive = active.doubleWhenInactive === true;
     return (
       nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
       nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
       nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
-      nearlyEqual(burstP, burstA)
+      nearlyEqual(burstP, burstA) &&
+      pInactive === aInactive
     );
   }
   return false;
@@ -134,15 +137,26 @@ export function OptimizerPanel({
   }, [sweepResult.summaries]);
 
   const observedCaptureEnergy = useMemo((): OptimizerScatterObserved[] => {
-    return summariesRanked.map((summary) => ({
-      x: summary.meanMahPerDay,
-      y: summary.meanCaptureRate,
-      id: summary.policyId,
-      tooltip: policyHoverLabel(summary),
-      variant: summary.kind === "adaptive" ? "adaptive" : "fixed_sweep",
-      highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
-      pareto: summary.isParetoEfficient
-    }));
+    return summariesRanked.map((summary) => {
+      let variant: OptimizerScatterObserved["variant"] = "fixed_sweep";
+      if (summary.kind === "adaptive") {
+        variant = "adaptive";
+      } else if (
+        summary.kind === "fixed_sweep_inactivity_double" ||
+        summary.kind === "baseline_fixed_inactivity_double"
+      ) {
+        variant = "fixed_inactivity_double";
+      }
+      return {
+        x: summary.meanMahPerDay,
+        y: summary.meanCaptureRate,
+        id: summary.policyId,
+        tooltip: policyHoverLabel(summary),
+        variant,
+        highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
+        pareto: summary.isParetoEfficient
+      };
+    });
   }, [summariesRanked, baseConfig]);
 
   const baselinePointObserved = useMemo(
