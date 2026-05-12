@@ -121,8 +121,12 @@ export function SweepControlsPanel({
           </p>
           <p>Uses your last built simulation configuration.</p>
           <p>
-            Smaller-grid adaptives: <code>baselineDrive</code> values sit below the 0.5 neutral anchor on purpose (energy-saving
-            idle state; motion/peer can ramp duty when active).
+            This sweep tests whether efficient adaptive BLE policies can preserve frequent advertising while downscaling scan
+            effort.
+          </p>
+          <p>
+            Interactive and smoke-test grids use <code>baselineDrive</code> values below the 0.5 neutral sampling anchor on
+            purpose (energy-saving idle bias; motion/peer terms can ramp duty when active).
           </p>
           <p>
             Aggregate mode draws world seeds from a fixed pool ({SWEEP_REPORT_SEED_POOL.join(", ")}). Choose how many seeds to
@@ -232,6 +236,13 @@ export function SweepControlsPanel({
           <span>What this sweep exercises</span>
         </summary>
         <dl className="sweep-grid-details-list">
+          <div className="sweep-grid-details-row sweep-grid-details-row--block">
+            <dt>Hypothesis</dt>
+            <dd>
+              This sweep tests whether efficient adaptive BLE policies can preserve frequent advertising while downscaling scan
+              effort.
+            </dd>
+          </div>
           <div className="sweep-grid-details-row">
             <dt>Policies per seed</dt>
             <dd>

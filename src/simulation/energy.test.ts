@@ -4,7 +4,7 @@ import {
   JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS,
   milliampHoursFromMeanMicroAmps
 } from "./config";
-import { computeEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
+import { computeEnergyLog, meanEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
 import { runSimulation } from "./engine";
 import type { BleBurstEvent, EnergyConfig } from "./types";
 import { createInitialSimulation } from "./world";
@@ -31,6 +31,26 @@ describe("energy model", () => {
     expect(energy.steadyMah).toBeCloseTo(expectedSteady, 6);
     expect(energy.scanMah).toBe(0);
     expect(energy.advertisingMah).toBe(0);
+  });
+
+  it("meanEnergyLog averages per-collar rows element-wise", () => {
+    const burstsA: BleBurstEvent[] = [
+      { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "p" }
+    ];
+    const burstsB: BleBurstEvent[] = [
+      { kind: "scan", startTime: 0, endTime: 3, animalId: "animal-2", policyId: "p" }
+    ];
+    const config = {
+      ...defaultSimulationConfig.energy,
+      baselineCurrentMicroAmps: 0,
+      advertisingEventIntervalSeconds: 10,
+      componentBleActivityScale: 1
+    };
+    const a = computeEnergyLog(60, 60, burstsA, config, 0);
+    const b = computeEnergyLog(60, 60, burstsB, config, 0);
+    const m = meanEnergyLog(60, [a, b]);
+    expect(m.totalMah).toBeCloseTo((a.totalMah + b.totalMah) / 2, 8);
+    expect(m.cumulativeMah).toBeCloseTo((a.cumulativeMah + b.cumulativeMah) / 2, 8);
   });
 
   it("uses scan listen duty and advertising event charge instead of burst wall time", () => {
@@ -76,7 +96,7 @@ describe("energy model", () => {
     expect(final.energy.cumulativeMah).toBeLessThanOrEqual(expectedMah * 1.02);
   });
 
-  it("24h with many animals still reports one-collar energy (not scaled by animal count)", () => {
+  it("24h cohort-mean cumulative matches mean of per-animal cumulative tracks", () => {
     const base = {
       ...defaultSimulationConfig,
       seed: "energy-day",
@@ -86,9 +106,17 @@ describe("energy model", () => {
       energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
     };
     const steps = (24 * 3600) / base.timeStepSeconds;
+    const twelveState = runSimulation(createInitialSimulation({ ...base, animalCount: 12 }), steps);
+    const twelve = twelveState.energy.cumulativeMah;
+    const manualMean =
+      twelveState.animals.reduce((sum, a) => sum + (twelveState.animalEnergyCumulativeMah[a.id] ?? 0), 0) /
+      twelveState.animals.length;
+    expect(twelve).toBeCloseTo(manualMean, 5);
     const one = runSimulation(createInitialSimulation({ ...base, animalCount: 1 }), steps).energy.cumulativeMah;
-    const twelve = runSimulation(createInitialSimulation({ ...base, animalCount: 12 }), steps).energy.cumulativeMah;
-    expect(Math.abs(twelve - one) / one).toBeLessThanOrEqual(0.03);
+    const expectedMah = milliampHoursFromMeanMicroAmps(JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS, 24);
+    expect(one).toBeGreaterThanOrEqual(expectedMah * 0.98);
+    expect(one).toBeLessThanOrEqual(expectedMah * 1.02);
+    expect(Math.abs(twelve - one) / one).toBeLessThanOrEqual(0.08);
   });
 
   it("projected mAh/day is stable for timeStepSeconds 30s vs 60s (common dashboard dts)", () => {

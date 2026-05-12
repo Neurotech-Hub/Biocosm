@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   decimateMovementStripEvents,
   type AdaptiveBleTimePoint,
@@ -51,6 +51,11 @@ const MOVEMENT_FRACTION_AVG_WINDOW_SECONDS = 600;
 /** Max dots per animal row on the movement strip (avoids overlap when timestep is dense). */
 const MOVEMENT_STRIP_MAX_DOTS_PER_ANIMAL = 280;
 
+/** Display cohort-mean per-epoch energy on the right axis in µAh (1 mAh = 1000 µAh). */
+const MICROAMP_HOURS_PER_MILLIAMP_HOUR = 1000;
+
+type EnergyChartMode = "cumulative" | "perEpoch";
+
 type StripSummary = ReturnType<typeof createStripSummary>;
 
 export function TimeSeriesPanel({
@@ -64,9 +69,11 @@ export function TimeSeriesPanel({
   animalIds,
   startTimeSeconds
 }: TimeSeriesPanelProps) {
+  const cohortSize = Math.max(1, animalIds.length);
+  const [energyChartMode, setEnergyChartMode] = useState<EnergyChartMode>("cumulative");
   const mainSummary = useMemo(
-    () => createChartSummary(points, energy, currentStep),
-    [currentStep, energy, points]
+    () => createChartSummary(points, energy, currentStep, energyChartMode, cohortSize),
+    [cohortSize, currentStep, energy, energyChartMode, points]
   );
   const adaptiveBleSummary = useMemo(
     () => createAdaptiveBleChartSummary(adaptiveBleSeries, points, currentStep),
@@ -128,12 +135,39 @@ export function TimeSeriesPanel({
         </StripChartCard>
 
         <div className="time-series-chart-card">
-          <h3 className="chart-subtitle chart-card-title">Light phase, moving fraction, and cumulative energy</h3>
+          <div className="chart-card-heading-row">
+            <h3 className="chart-subtitle chart-card-title">Light phase, moving fraction, and energy</h3>
+            <div className="chart-energy-mode-toggle" role="group" aria-label="Energy series scale">
+              <span className="chart-energy-mode-toggle-label">Energy:</span>
+              <label className="chart-energy-mode-option">
+                <input
+                  type="radio"
+                  name="energy-chart-mode"
+                  checked={energyChartMode === "cumulative"}
+                  onChange={() => setEnergyChartMode("cumulative")}
+                />
+                Cumulative
+              </label>
+              <label className="chart-energy-mode-option">
+                <input
+                  type="radio"
+                  name="energy-chart-mode"
+                  checked={energyChartMode === "perEpoch"}
+                  onChange={() => setEnergyChartMode("perEpoch")}
+                />
+                Per epoch (µAh)
+              </label>
+            </div>
+          </div>
           <svg
             className="time-series-chart"
             viewBox={`0 0 ${chartWidth} ${chartHeight}`}
             role="img"
-            aria-label="Light phase and normalized animal movement over time"
+            aria-label={
+              energyChartMode === "cumulative"
+                ? "Light phase, moving animal fraction, and cumulative energy over simulation time"
+                : "Light phase, moving animal fraction, and cohort mean energy per simulation epoch in microamp hours"
+            }
           >
             <rect x="0" y="0" width={chartWidth} height={chartHeight} rx="12" className="chart-background" />
             {points.map((point, index) => {
@@ -191,7 +225,7 @@ export function TimeSeriesPanel({
               transform={`rotate(90 ${chartWidth - 16} ${chartPadding.top + mainSummary.plotHeight / 2})`}
               textAnchor="middle"
             >
-              Energy (mAh)
+              {mainSummary.energyAxisTitle}
             </text>
             {mainSummary.movementTicks.map((tick) => {
               const y =
@@ -242,10 +276,11 @@ export function TimeSeriesPanel({
               <i className="legend-swatch dark-swatch" /> dark
             </span>
             <span>
-              <i className="legend-swatch movement-swatch" /> moving animal fraction, 10 min avg (0–1, left axis)
+              <i className="legend-swatch movement-swatch" /> fraction of {cohortSize} animals moving, 10 min avg
+              (0–1, left axis)
             </span>
             <span>
-              <i className="legend-swatch energy-swatch" /> cumulative energy used (mAh, right axis)
+              <i className="legend-swatch energy-swatch" /> {mainSummary.energyLegendLine}
             </span>
           </div>
         </div>
@@ -370,12 +405,12 @@ export function TimeSeriesPanel({
 
         {activePolicyType === "fixed" && fixedBleSeries.length > 0 && fixedBleSummary.hasPolicyRow ? (
           <div className="time-series-chart-card">
-            <h3 className="chart-subtitle chart-card-title">Fixed-rate BLE schedule</h3>
+            <h3 className="chart-subtitle chart-card-title">Fixed-rate BLE schedule (cohort mean)</h3>
             <svg
               className="time-series-chart ble-policy-chart"
               viewBox={`0 0 ${chartWidth} ${bleChartHeight}`}
               role="img"
-              aria-label="Constant scan, advertise, and window intervals for fixed-rate BLE policy over time"
+              aria-label="Cohort mean applied scan, advertise, and window intervals and envelope duty for fixed-rate BLE over time"
             >
               <rect x="0" y="0" width={chartWidth} height={bleChartHeight} rx="12" className="chart-background" />
               <line
@@ -472,16 +507,16 @@ export function TimeSeriesPanel({
             </svg>
             <div className="chart-legend">
               <span>
-                <i className="legend-swatch ble-legend-fixed-scan" /> scan interval (s)
+                <i className="legend-swatch ble-legend-fixed-scan" /> mean scan interval (s, {cohortSize} animals)
               </span>
               <span>
-                <i className="legend-swatch ble-legend-fixed-adv" /> advertise interval (s)
+                <i className="legend-swatch ble-legend-fixed-adv" /> mean advertise interval (s, {cohortSize} animals)
               </span>
               <span>
-                <i className="legend-swatch ble-legend-fixed-window" /> scan window (s)
+                <i className="legend-swatch ble-legend-fixed-window" /> mean scan window (s, {cohortSize} animals)
               </span>
               <span>
-                <i className="legend-swatch ble-legend-fixed-duty" /> envelope duty (0–1, right)
+                <i className="legend-swatch ble-legend-fixed-duty" /> mean envelope duty (0–1, right)
               </span>
             </div>
           </div>
@@ -646,9 +681,19 @@ function createStripSummary(
   };
 }
 
-function createChartSummary(points: TimeSeriesPoint[], energy: EnergyLog[], currentStep: number) {
+function createChartSummary(
+  points: TimeSeriesPoint[],
+  energy: EnergyLog[],
+  currentStep: number,
+  energyMode: EnergyChartMode,
+  cohortSize: number
+) {
   const maxMovement = 1;
-  const maxEnergy = Math.max(0.01, ...energy.map((point) => point.cumulativeMah));
+  const energyValues =
+    energyMode === "cumulative"
+      ? energy.map((row) => row.cumulativeMah)
+      : energy.map((row) => row.totalMah * MICROAMP_HOURS_PER_MILLIAMP_HOUR);
+  const maxEnergy = Math.max(energyMode === "perEpoch" ? 1 : 0.01, ...energyValues);
   const maxTime = Math.max(1, points.at(-1)?.time ?? 1);
   const plotWidth = chartWidth - chartPadding.left - chartPadding.right;
   const plotHeight = chartHeight - chartPadding.top - chartPadding.bottom;
@@ -664,12 +709,23 @@ function createChartSummary(points: TimeSeriesPoint[], energy: EnergyLog[], curr
   const energyPath = energy
     .map((point, index) => {
       const x = chartPadding.left + (point.time / maxTime) * plotWidth;
-      const y = chartPadding.top + plotHeight - (point.cumulativeMah / maxEnergy) * plotHeight;
+      const value =
+        energyMode === "cumulative"
+          ? point.cumulativeMah
+          : point.totalMah * MICROAMP_HOURS_PER_MILLIAMP_HOUR;
+      const y = chartPadding.top + plotHeight - (value / maxEnergy) * plotHeight;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(" ");
 
   const cursorX = chartPadding.left + ((points[currentStep]?.time ?? 0) / maxTime) * plotWidth;
+
+  const energyAxisTitle =
+    energyMode === "cumulative" ? "Cumulative energy (mAh)" : "Energy per epoch (µAh)";
+  const energyLegendLine =
+    energyMode === "cumulative"
+      ? `cohort mean cumulative energy (mAh, mean of ${cohortSize} animals, right axis)`
+      : `cohort mean energy per epoch (µAh, mean of ${cohortSize} animals, right axis)`;
 
   return {
     maxMovement,
@@ -682,6 +738,8 @@ function createChartSummary(points: TimeSeriesPoint[], energy: EnergyLog[], curr
     energyTicks: createTicks(0, maxEnergy, 4),
     movementPath,
     energyPath,
+    energyAxisTitle,
+    energyLegendLine,
     cursorX
   };
 }
@@ -754,21 +812,33 @@ function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSer
       dutyTicks: createTicks(0, 1, 2)
     };
   }
-  const row = series[0];
-  const hasPolicyRow = row.scanIntervalSeconds > 0 && row.advIntervalSeconds > 0;
-  const maxSeconds = Math.max(row.scanIntervalSeconds, row.advIntervalSeconds, row.scanWindowSeconds, 0.01) * 1.05;
-  const maxDuty = 1;
-  const yScan = chartPadding.top + plotHeight - (row.scanIntervalSeconds / maxSeconds) * plotHeight;
-  const yAdv = chartPadding.top + plotHeight - (row.advIntervalSeconds / maxSeconds) * plotHeight;
-  const yWin = chartPadding.top + plotHeight - (row.scanWindowSeconds / maxSeconds) * plotHeight;
-  const yDuty = chartPadding.top + plotHeight - (row.envelopeDuty / maxDuty) * plotHeight;
-  const pathAtY = (y: number) =>
+  const first = series[0]!;
+  const hasPolicyRow = first.scanIntervalSeconds > 0 && first.advIntervalSeconds > 0;
+  const maxSeconds =
+    Math.max(
+      0.01,
+      ...series.flatMap((p) => [p.scanIntervalSeconds, p.advIntervalSeconds, p.scanWindowSeconds])
+    ) * 1.05;
+  const maxDuty = Math.max(0.01, ...series.map((p) => p.envelopeDuty)) * 1.05;
+
+  const secondsPath = (valueAt: (p: FixedBleTimePoint) => number) =>
     series
       .map((point, index) => {
         const x = chartPadding.left + (point.time / maxTime) * plotWidth;
+        const v = valueAt(point);
+        const y = chartPadding.top + plotHeight - (v / maxSeconds) * plotHeight;
         return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
       })
       .join(" ");
+
+  const dutyPath = series
+    .map((point, index) => {
+      const x = chartPadding.left + (point.time / maxTime) * plotWidth;
+      const y = chartPadding.top + plotHeight - (point.envelopeDuty / maxDuty) * plotHeight;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+
   const cursorX = chartPadding.left + ((points[currentStep]?.time ?? 0) / maxTime) * plotWidth;
   return {
     hasPolicyRow,
@@ -778,10 +848,10 @@ function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSer
     maxSeconds,
     maxDuty,
     cursorX,
-    scanIntervalPath: pathAtY(yScan),
-    advIntervalPath: pathAtY(yAdv),
-    scanWindowPath: pathAtY(yWin),
-    envelopeDutyPath: pathAtY(yDuty),
+    scanIntervalPath: secondsPath((p) => p.scanIntervalSeconds),
+    advIntervalPath: secondsPath((p) => p.advIntervalSeconds),
+    scanWindowPath: secondsPath((p) => p.scanWindowSeconds),
+    envelopeDutyPath: dutyPath,
     secondTicks: createTicks(0, maxSeconds, 5),
     dutyTicks: createTicks(0, maxDuty, 5)
   };

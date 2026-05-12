@@ -21,6 +21,10 @@ export function RawDataPanel({ logs, config, metrics, timeline = [] }: RawDataPa
             Firmware-minute rollups collapse raw BLE detections into clock-minute buckets, similar to a collar log.
             Each observer gets one row per minute with unique peers and the strongest RSSI per peer.
           </p>
+          <p>
+            The <strong>energy</strong> CSV section is one row per simulation timestep: values are the{" "}
+            <strong>cohort mean</strong> across animals (same series as the Simulation time-series energy chart).
+          </p>
           <dl className="metric-definition-list">
             <dt>Observer-minute rows</dt>
             <dd>Number of observer/minute buckets that contain at least one detected peer.</dd>
@@ -74,7 +78,7 @@ function downloadCsvBundle(logs: SimulationLogs, firmwareMinuteRecords: Firmware
     csvSection("adaptiveBlePolicy", logs.adaptiveBlePolicy),
     csvSection("firmwareMinuteRecords", firmwareMinuteRecordRows(firmwareMinuteRecords)),
     csvSection("collarStates", logs.collarStates),
-    csvSection("energy", logs.energy)
+    csvSection("energy (cohort mean per timestep)", logs.energy)
   ];
   downloadBlob("biocosm-raw-logs.csv", sections.join("\n\n"), "text/csv");
 }

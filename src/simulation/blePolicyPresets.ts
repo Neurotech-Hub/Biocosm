@@ -138,6 +138,7 @@ export function referenceDiscoveryBlePreset(): BlePolicyPresetDef {
 
 /**
  * Spec §11 — adaptive anchors for general-discovery (override generic formula).
+ * Low intensity keeps frequent advertising (5 s) while backing off scan interval.
  * Other presets use formula from baseline scan/adv/window.
  */
 export function buildAdaptiveAnchorsFromBaseline(preset: BlePolicyPresetDef): AdaptiveBleTimingAnchors {
@@ -145,9 +146,9 @@ export function buildAdaptiveAnchorsFromBaseline(preset: BlePolicyPresetDef): Ad
   if (preset.id === "general-discovery" || preset.id === "juxta-v56-social") {
     return {
       lowIntensity: {
-        scanIntervalSeconds: 40,
+        scanIntervalSeconds: 60,
         scanWindowSeconds: 0.75,
-        advIntervalSeconds: 10
+        advIntervalSeconds: 5
       },
       neutral: {
         scanIntervalSeconds: 20,

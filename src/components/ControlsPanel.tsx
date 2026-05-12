@@ -667,9 +667,9 @@ export function ControlsPanel({
             Advertise interval: {fixedPolicy.advIntervalSeconds}s
             <input
               type="range"
-              min="5"
-              max="50"
-              step="5"
+              min="1"
+              max="20"
+              step="1"
               value={fixedPolicy.advIntervalSeconds}
               onChange={(event) =>
                 syncFixedPolicyAndPreset({
@@ -702,17 +702,48 @@ export function ControlsPanel({
               type="checkbox"
               checked={fixedPolicy.doubleWhenInactive === true}
               onChange={(event) =>
-                syncFixedPolicyAndPreset({
-                  ...fixedPolicy,
-                  doubleWhenInactive: event.target.checked ? true : undefined
-                })
+                syncFixedPolicyAndPreset(
+                  event.target.checked
+                    ? {
+                        ...fixedPolicy,
+                        doubleWhenInactive: true,
+                        inactiveScanIntervalMultiplier: fixedPolicy.inactiveScanIntervalMultiplier ?? 2
+                      }
+                    : {
+                        ...fixedPolicy,
+                        doubleWhenInactive: undefined,
+                        inactiveScanIntervalMultiplier: undefined
+                      }
+                )
               }
             />
-            Double scan/adv when inactive
+            Stretch scan interval when inactive
           </label>
+          {fixedPolicy.doubleWhenInactive === true ? (
+            <label>
+              Inactive scan multiplier
+              <select
+                value={String(fixedPolicy.inactiveScanIntervalMultiplier ?? 2)}
+                onChange={(event) =>
+                  syncFixedPolicyAndPreset({
+                    ...fixedPolicy,
+                    doubleWhenInactive: true,
+                    inactiveScanIntervalMultiplier: Number(event.target.value) as 2 | 3 | 4 | 5
+                  })
+                }
+              >
+                <option value="2">2×</option>
+                <option value="3">3×</option>
+                <option value="4">4×</option>
+                <option value="5">5×</option>
+              </select>
+            </label>
+          ) : null}
           <p className="helper-text">
-            When enabled, scan and advertising intervals double for any epoch where the collar motion sensor reports no motion
-            (quasi-adaptive on top of fixed-rate schedules).
+            After each animal's collar reports <strong>no motion</strong> continuously for at least its sampled{" "}
+            <strong>movement bout mean</strong> (minutes, from the species preset), only the <strong>scan interval</strong> is
+            multiplied by the selected factor until motion resumes (quasi-adaptive on top of fixed-rate schedules). Advertising
+            stays on the nominal schedule.
           </p>
         </>
         ) : adaptivePolicy ? (

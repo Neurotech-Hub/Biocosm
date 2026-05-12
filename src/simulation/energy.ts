@@ -22,7 +22,6 @@ export function computeEnergyLog(
   previousCumulativeMah = 0
 ): EnergyLog {
   const interval = config.advertisingEventIntervalSeconds;
-  /** One representative collar — see `energyBurstsForRepresentativeCollar` in engine. */
   const steadyMah = microAmpSecondsToMilliampHours(config.baselineCurrentMicroAmps, epochSeconds);
 
   const bleScale = config.componentBleActivityScale ?? 1;
@@ -47,6 +46,53 @@ export function computeEnergyLog(
     remainingMah,
     remainingPercent,
     estimatedVoltage: estimateLipoVoltage(remainingPercent, config.startingVoltage)
+  };
+}
+
+/** Element-wise mean of per-collar `computeEnergyLog` rows (cohort energy for one timestep). */
+export function meanEnergyLog(time: number, logs: EnergyLog[]): EnergyLog {
+  if (logs.length === 0) {
+    return {
+      time,
+      steadyMah: 0,
+      scanMah: 0,
+      advertisingMah: 0,
+      totalMah: 0,
+      cumulativeMah: 0,
+      remainingMah: 0,
+      remainingPercent: 0,
+      estimatedVoltage: 0
+    };
+  }
+  const n = logs.length;
+  let steadyMah = 0;
+  let scanMah = 0;
+  let advertisingMah = 0;
+  let totalMah = 0;
+  let cumulativeMah = 0;
+  let remainingMah = 0;
+  let remainingPercent = 0;
+  let estimatedVoltage = 0;
+  for (const row of logs) {
+    steadyMah += row.steadyMah;
+    scanMah += row.scanMah;
+    advertisingMah += row.advertisingMah;
+    totalMah += row.totalMah;
+    cumulativeMah += row.cumulativeMah;
+    remainingMah += row.remainingMah;
+    remainingPercent += row.remainingPercent;
+    estimatedVoltage += row.estimatedVoltage;
+  }
+  return {
+    time,
+    steadyMah: steadyMah / n,
+    scanMah: scanMah / n,
+    advertisingMah: advertisingMah / n,
+    totalMah: totalMah / n,
+    cumulativeMah: cumulativeMah / n,
+    remainingMah: remainingMah / n,
+    remainingPercent: remainingPercent / n,
+    estimatedVoltage: estimatedVoltage / n
   };
 }
 

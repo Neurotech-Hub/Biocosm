@@ -13,7 +13,7 @@ function baselineRatios(baseline: SweepPolicySummary): {
   return { capture: cap, energy: en, efficiency: eff };
 }
 
-/** Discrete fixed-policy candidates from sweep bundle (comparison baseline + fixed grid + inactive-double variants). */
+/** Discrete fixed-policy candidates from sweep bundle (comparison baseline + fixed grid + bout-delayed inactive-scan variants). */
 export function sweepFixedSummariesToCandidates(
   baselineSummary: SweepPolicySummary,
   summaries: SweepPolicySummary[]
@@ -27,7 +27,9 @@ export function sweepFixedSummariesToCandidates(
     if (
       s.kind === "fixed_sweep" ||
       s.kind === "fixed_sweep_inactivity_double" ||
-      s.kind === "baseline_fixed_inactivity_double"
+      s.kind === "fixed_sweep_inactive_scan_x5" ||
+      s.kind === "baseline_fixed_inactivity_double" ||
+      s.kind === "baseline_fixed_inactive_scan_x5"
     ) {
       fixedSummaries.push(s);
     }

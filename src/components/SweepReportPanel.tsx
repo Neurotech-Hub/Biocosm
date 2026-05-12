@@ -1,6 +1,5 @@
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { InfoPopover } from "./InfoPopover";
-import { bleBaselinePresetDefForSweep } from "../simulation/blePolicyPresets";
 import type { SimulationConfig } from "../simulation/types";
 import type { CandidatePick, SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
 import type { SweepBundleWithCandidates, SweepRawRow } from "../simulation/sweep/adaptiveBleSweep";
@@ -14,46 +13,38 @@ const SWEEP_PLOT_WIDTH = 920;
 const SWEEP_PLOT_HEIGHT = 440;
 const SWEEP_PLOT_PAD = { left: 58, right: 24, top: 34, bottom: 48 };
 const SWEEP_PLOT_SVG_FONT_AXIS = 14;
-const SWEEP_PLOT_SVG_FONT_BASELINE_LABEL = 14;
+const SWEEP_PLOT_SVG_FONT_TICK = 11;
+
+/** Inclusive tick positions from `min` to `max` (axis domain after padding). */
+function sweepAxisTicks(min: number, max: number, tickCount: number): number[] {
+  if (tickCount <= 1 || max < min) {
+    return [min, max];
+  }
+  return Array.from({ length: tickCount }, (_, index) => min + ((max - min) * index) / (tickCount - 1));
+}
+
+function formatSweepScatterXTick(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  if (Math.abs(value) >= 100) {
+    return value.toFixed(0);
+  }
+  if (Math.abs(value) >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(2);
+}
+
+function formatSweepScatterYTick(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  return value.toFixed(3);
+}
 
 function policyHoverLabel(summary: SweepPolicySummary): string {
   return `${summary.policyId} — ${summary.label}`;
-}
-
-function nearlyEqual(a: number, b: number, eps = 1e-5): boolean {
-  return Math.abs(a - b) < eps;
-}
-
-/** True when the built Simulator policy matches this sweep row’s swept parameters. */
-function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: SimulationConfig): boolean {
-  if (!summary.params) {
-    return false;
-  }
-  const active = config.activePolicy;
-  if (summary.params.family === "adaptive" && active.type === "motion_peer_adaptive") {
-    const p = summary.params;
-    return (
-      nearlyEqual(p.baselineDrive, active.baselineDrive) &&
-      nearlyEqual(p.motionWeight, active.motionWeight) &&
-      nearlyEqual(p.peerWeight, active.peerWeight) &&
-      p.tauPeerSeconds === active.tauPeerSeconds
-    );
-  }
-  if (summary.params.family === "fixed" && active.type === "fixed") {
-    const p = summary.params;
-    const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
-    const burstA = active.advertisingBurstDurationSeconds ?? 2;
-    const pInactive = p.doubleWhenInactive === true;
-    const aInactive = active.doubleWhenInactive === true;
-    return (
-      nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
-      nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
-      nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
-      nearlyEqual(burstP, burstA) &&
-      pInactive === aInactive
-    );
-  }
-  return false;
 }
 
 /** Axis explanations for sweep chart popovers — explicit x/y and units. */
@@ -87,15 +78,29 @@ function algBadge(summary: SweepPolicySummary): { letter: string; title: string;
   if (summary.kind === "baseline_fixed_inactivity_double") {
     return {
       letter: "D",
-      title: "Baseline schedule with inactive ×2 scan/adv",
+      title: "Baseline schedule with bout-delayed inactive scan ×2",
       className: "sweep-alg sweep-alg-fixed-dd"
+    };
+  }
+  if (summary.kind === "baseline_fixed_inactive_scan_x5") {
+    return {
+      letter: "5",
+      title: "Baseline schedule with bout-delayed inactive scan ×5",
+      className: "sweep-alg sweep-alg-fixed-i5"
     };
   }
   if (summary.kind === "fixed_sweep_inactivity_double") {
     return {
       letter: "D",
-      title: "Fixed-rate sweep with inactive ×2 scan/adv",
+      title: "Fixed-rate sweep with bout-delayed inactive scan ×2",
       className: "sweep-alg sweep-alg-fixed-dd"
+    };
+  }
+  if (summary.kind === "fixed_sweep_inactive_scan_x5") {
+    return {
+      letter: "5",
+      title: "Fixed-rate sweep with bout-delayed inactive scan ×5",
+      className: "sweep-alg sweep-alg-fixed-i5"
     };
   }
   if (summary.kind === "fixed_sweep") {
@@ -104,13 +109,31 @@ function algBadge(summary: SweepPolicySummary): { letter: string; title: string;
   return { letter: "A", title: "Adaptive BLE", className: "sweep-alg sweep-alg-adaptive" };
 }
 
+function scatterVariantFromSummary(summary: SweepPolicySummary): ScatterPoint["variant"] {
+  if (summary.kind === "adaptive") {
+    return "adaptive";
+  }
+  if (
+    summary.kind === "baseline_fixed_inactivity_double" ||
+    summary.kind === "fixed_sweep_inactivity_double"
+  ) {
+    return "fixed_inactive_x2";
+  }
+  if (
+    summary.kind === "baseline_fixed_inactive_scan_x5" ||
+    summary.kind === "fixed_sweep_inactive_scan_x5"
+  ) {
+    return "fixed_inactive_x5";
+  }
+  return "fixed_no_inactive";
+}
+
 type ScatterPoint = {
   x: number;
   y: number;
   id: string;
   tooltip: string;
-  variant: "adaptive" | "fixed_sweep" | "fixed_inactivity_double";
-  highlight: boolean;
+  variant: "adaptive" | "fixed_no_inactive" | "fixed_inactive_x2" | "fixed_inactive_x5";
   /** Non-dominated on mean capture vs mean mAh/day (same as summary CSV). */
   pareto: boolean;
 };
@@ -118,6 +141,7 @@ type ScatterPoint = {
 /** Columns that get red→yellow→green tint (Alg / Policy stay plain). */
 const SWEEP_METRIC_COLUMNS = [
   "rank",
+  "pareto",
   "bd",
   "mw",
   "pw",
@@ -134,6 +158,7 @@ const SWEEP_METRIC_COLUMNS = [
 type SweepMetricColumn = (typeof SWEEP_METRIC_COLUMNS)[number];
 
 const SWEEP_TABLE_SORT_KEYS = [
+  "pareto",
   "bd",
   "mw",
   "pw",
@@ -151,6 +176,7 @@ type SweepTableSortKey = (typeof SWEEP_TABLE_SORT_KEYS)[number];
 
 const SWEEP_COLUMN_SENTIMENT: Record<SweepMetricColumn, "higherBetter" | "lowerBetter"> = {
   rank: "lowerBetter",
+  pareto: "higherBetter",
   bd: "higherBetter",
   mw: "higherBetter",
   pw: "higherBetter",
@@ -186,6 +212,9 @@ function extractSweepMetricValue(
 ): number | null {
   if (column === "rank") {
     return rank;
+  }
+  if (column === "pareto") {
+    return summary.isParetoEfficient ? 1 : 0;
   }
   const p = summary.params;
   if (column === "bd") {
@@ -226,7 +255,13 @@ function extractSweepMetricValue(
 }
 
 function defaultSortDirection(key: SweepTableSortKey): "asc" | "desc" {
-  return key === "mAh" ? "asc" : "desc";
+  if (key === "mAh") {
+    return "asc";
+  }
+  if (key === "pareto") {
+    return "desc";
+  }
+  return "desc";
 }
 
 function sortValueForColumn(
@@ -352,12 +387,14 @@ export function SweepReportPanel({
     return copy;
   }, [policiesUnordered, sweepResult, tableSortKey, tableSortDir]);
 
-  /** Sweep summaries only (plots keep a separate dashed Juxta reference point). */
-  const summariesByEfficiency = useMemo(() => {
+  /** Policies for capture vs energy (comparison baseline included; one marker per policy). */
+  const scatterPlotPolicies = useMemo(() => {
     if (!sweepResult) {
       return [];
     }
-    return [...sweepResult.summaries].sort((a, b) => b.meanBleEfficiency - a.meanBleEfficiency);
+    return [sweepResult.baselineSummary, ...sweepResult.summaries].sort(
+      (a, b) => b.meanBleEfficiency - a.meanBleEfficiency
+    );
   }, [sweepResult]);
 
   const sweepTableMetricStyles = useMemo(() => {
@@ -390,27 +427,15 @@ export function SweepReportPanel({
   };
 
   const captureVsEnergyPoints = useMemo((): ScatterPoint[] => {
-    return summariesByEfficiency.map((summary) => {
-      let variant: ScatterPoint["variant"] = "fixed_sweep";
-      if (summary.kind === "adaptive") {
-        variant = "adaptive";
-      } else if (
-        summary.kind === "fixed_sweep_inactivity_double" ||
-        summary.kind === "baseline_fixed_inactivity_double"
-      ) {
-        variant = "fixed_inactivity_double";
-      }
-      return {
-        x: summary.meanMahPerDay,
-        y: summary.meanCaptureRate,
-        id: summary.policyId,
-        tooltip: policyHoverLabel(summary),
-        variant,
-        highlight: sweepSummaryMatchesBuilt(summary, baseConfig),
-        pareto: summary.isParetoEfficient
-      };
-    });
-  }, [summariesByEfficiency, baseConfig]);
+    return scatterPlotPolicies.map((summary) => ({
+      x: summary.meanMahPerDay,
+      y: summary.meanCaptureRate,
+      id: summary.policyId,
+      tooltip: policyHoverLabel(summary),
+      variant: scatterVariantFromSummary(summary),
+      pareto: summary.isParetoEfficient
+    }));
+  }, [scatterPlotPolicies]);
 
   const downloadRawCsv = () => {
     if (!sweepResult) {
@@ -450,8 +475,7 @@ export function SweepReportPanel({
   };
 
   const hasResult = Boolean(sweepResult);
-  const sweepTableColSpan = 13;
-  const comparisonBleMeta = bleBaselinePresetDefForSweep(baseConfig);
+  const sweepTableColSpan = 14;
 
   return (
     <div className="sweep-report-panel">
@@ -475,14 +499,6 @@ export function SweepReportPanel({
             subtitle="Upper-left is better capture at lower energy (standard capture-vs-energy tradeoff plot)."
             xLabel="mAh/day"
             yLabel="BLE capture rate"
-            baselinePoint={{
-              x: sweepResult.baselineSummary.meanMahPerDay,
-              y: sweepResult.baselineSummary.meanCaptureRate,
-              label: comparisonBleMeta.label,
-              tooltip: `${comparisonBleMeta.label} (${sweepResult.baselineSummary.policyId}) — comparison baseline from your Simulator BLE policy preset; dashed ring distinguishes reference among yellow fixed-rate points`,
-              pareto: sweepResult.baselineSummary.isParetoEfficient
-            }}
-            baselineMatchesBuilt={sweepSummaryMatchesBuilt(sweepResult.baselineSummary, baseConfig)}
             points={captureVsEnergyPoints}
           />
         ) : (
@@ -503,19 +519,25 @@ export function SweepReportPanel({
             <dl className="metric-definition-list">
               <dt>Rank</dt>
               <dd>Current row index after sorting (1 = top row). Sort with column headers to change order.</dd>
-              <dt>Alg · Pareto</dt>
+              <dt>Alg</dt>
               <dd>
-                <strong>B</strong> = comparison baseline (fixed), <strong>F</strong> = other fixed-rate schedule,{" "}
-                <strong>A</strong> = adaptive. Hover for full policy id. <strong>Green circle</strong> = Pareto-efficient on
-                capture vs mAh/day; <strong>red</strong> = dominated. Use <strong>Simulate</strong> to load the row into the
-                Simulator tab. Violet outline on plots marks the policy matching your current built simulation when applicable.
+                <strong>B</strong> = comparison baseline (fixed), <strong>F</strong> = fixed-rate schedule without inactive scan
+                multiplier, <strong>D</strong> = inactive scan ×2, <strong>5</strong> = inactive scan ×5, <strong>A</strong>{" "}
+                = adaptive. Hover the badge for the full policy id. Use <strong>Simulate</strong> to load the row into the Simulator
+                tab.
+              </dd>
+              <dt>Pareto</dt>
+              <dd>
+                <code>true</code> / <code>false</code> for whether the policy is non-dominated on mean capture vs mean mAh/day among
+                all sweep rows (including the comparison baseline). Sort this column to group efficient policies.
               </dd>
               <dt>Cell tint</dt>
               <dd>
                 Each numeric column uses a red→yellow→green scale from worst to best within that column across all rows
                 (including the comparison baseline). mAh/day is greener when lower; capture, efficiency, and most other metrics
                 are greener when higher. Schedule and adaptive parameter columns use highest value as green when the tradeoff is
-                ambiguous. Em dash cells are neutral.
+                ambiguous. Em dash cells are neutral. The <strong>Pareto</strong> column uses the same tint scale (true ranks above
+                false).
               </dd>
               <dt>bd / mw / pw / τ peer</dt>
               <dd>Adaptive swept parameters only (— for fixed-rate rows).</dd>
@@ -528,7 +550,7 @@ export function SweepReportPanel({
               <dd>Mean interval-level BLE capture rate across seeds included in this run.</dd>
               <dt>mAh/day</dt>
               <dd>Mean estimated representative-collar BLE energy burden (milliamp-hours per day).</dd>
-              <dt>Efficiency</dt>
+              <dt>Eff.</dt>
               <dd>BLE hits per unit energy (capture rate scaled by estimated mAh/day), same notion as simulator metrics panels.</dd>
               <dt>Mean drive</dt>
               <dd>Adaptive mean sampling drive (— for fixed-rate).</dd>
@@ -540,9 +562,17 @@ export function SweepReportPanel({
             <thead>
               <tr>
                 <th>Rank</th>
-                <th className="sweep-th-alg-pareto" title="Algorithm family, Pareto marker (green = efficient), hover for policy id">
-                  Alg · Pareto
+                <th scope="col" title="Algorithm family (hover badge for policy id)">
+                  Alg
                 </th>
+                <SweepSortableTh
+                  columnKey="pareto"
+                  label="Pareto"
+                  hint="Non-dominated on mean capture vs mean mAh/day (true / false)"
+                  activeKey={tableSortKey}
+                  dir={tableSortDir}
+                  onSort={onSortColumnHeader}
+                />
                 {(
                   [
                     ["bd", "bd", "Adaptive baseline drive"],
@@ -551,10 +581,10 @@ export function SweepReportPanel({
                     ["tauPeer", "τ peer", "τ peer (s)"],
                     ["scanInt", "Scan int. (s)", "BLE scan interval"],
                     ["scanWin", "Scan win. (s)", "Scan burst listen window"],
-                    ["advInt", "Advertise int. (s)", "Interval between advertising bursts"],
+                    ["advInt", "Adv. Int. (s)", "Interval between advertising bursts"],
                     ["capture", "Capture", "Mean BLE capture rate"],
                     ["mAh", "mAh/day", "Mean energy burden"],
-                    ["efficiency", "Efficiency", "BLE efficiency (capture / mAh·day)"],
+                    ["efficiency", "Eff.", "BLE efficiency (capture / mAh·day)"],
                     ["meanDrive", "Mean drive", "Adaptive mean sampling drive"]
                   ] as const
                 ).map(([key, label, hint]) => (
@@ -580,7 +610,6 @@ export function SweepReportPanel({
                       metricStyles={sweepTableMetricStyles?.byPolicy.get(summary.policyId)}
                       summary={summary}
                       rawRows={sweepResult.rawRows}
-                      baseConfig={baseConfig}
                       onSimulatePolicy={onSimulatePolicy}
                       simulateDisabled={simulateDisabled}
                     />
@@ -662,7 +691,6 @@ function SweepTableRow({
   metricStyles,
   summary,
   rawRows,
-  baseConfig,
   onSimulatePolicy,
   simulateDisabled
 }: {
@@ -670,7 +698,6 @@ function SweepTableRow({
   metricStyles: Record<SweepMetricColumn, CSSProperties> | undefined;
   summary: SweepPolicySummary;
   rawRows: SweepRawRow[];
-  baseConfig: SimulationConfig;
   onSimulatePolicy?: (summary: SweepPolicySummary) => void;
   simulateDisabled?: boolean;
 }) {
@@ -680,7 +707,6 @@ function SweepTableRow({
 
   const canSimulate = Boolean(summary.params && onSimulatePolicy);
   const badge = algBadge(summary);
-  const matchesBuilt = sweepSummaryMatchesBuilt(summary, baseConfig);
   const p = summary.params;
 
   const bd = p?.family === "adaptive" ? p.baselineDrive : "—";
@@ -694,18 +720,13 @@ function SweepTableRow({
   const policyTip = policyHoverLabel(summary);
 
   return (
-    <tr className={matchesBuilt ? "sweep-table-row-matches-built" : undefined}>
+    <tr>
       <td style={cell("rank")}>{rank}</td>
       <td className="sweep-alg-cell">
         <span className="sweep-alg-hover" title={policyTip}>
           <span className={badge.className} title={badge.title}>
             {badge.letter}
           </span>
-          <span
-            className={summary.isParetoEfficient ? "sweep-pareto-dot sweep-pareto-dot--yes" : "sweep-pareto-dot sweep-pareto-dot--no"}
-            title={summary.isParetoEfficient ? "Pareto-efficient (capture vs mAh/day)" : "Dominated by another policy"}
-            aria-label={summary.isParetoEfficient ? "Pareto-efficient" : "Not Pareto-efficient"}
-          />
           {canSimulate ? (
             <button
               type="button"
@@ -717,6 +738,9 @@ function SweepTableRow({
             </button>
           ) : null}
         </span>
+      </td>
+      <td className="sweep-pareto-bool-cell" style={cell("pareto")}>
+        {summary.isParetoEfficient ? "true" : "false"}
       </td>
       <td style={cell("bd")}>{bd}</td>
       <td style={cell("mw")}>{mw}</td>
@@ -818,7 +842,7 @@ function SweepFixedAdaptiveComparisonTable({
             {numCell(bestAdaptive, (s) => s.meanMahPerDay, 4)}
           </tr>
           <tr>
-            <th scope="row">Efficiency</th>
+            <th scope="row">Eff.</th>
             {numCell(baseline, (s) => s.meanBleEfficiency, 4)}
             {numCell(bestFixed, (s) => s.meanBleEfficiency, 4)}
             {numCell(bestAdaptive, (s) => s.meanBleEfficiency, 4)}
@@ -893,36 +917,47 @@ function SweepPlotPlaceholder({
   );
 }
 
-/** Legend below the chart (same marker language as the Simulation tab time-series legends). */
+/** Legend below the sweep capture-vs-energy chart. */
 function SweepPlotLegendHtml() {
   return (
     <div className="chart-legend sweep-chart-legend" aria-label="Plot legend">
       <span>
-        <i className="sweep-legend-icon sweep-legend-icon--fixed" aria-hidden />
-        Fixed-rate sweep
+        <i className="sweep-legend-icon sweep-legend-icon--fixed-no-inactive" aria-hidden />
+        Fixed (no inactive multiplier)
       </span>
       <span>
-        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive" aria-hidden />
-        Fixed inactive ×2 (hollow)
+        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive-x2" aria-hidden />
+        Fixed inactive scan ×2
+      </span>
+      <span>
+        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive-x5" aria-hidden />
+        Fixed inactive scan ×5
       </span>
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--adaptive" aria-hidden />
         Adaptive sweep
       </span>
       <span>
-        <i className="sweep-legend-icon sweep-legend-icon--juxta" aria-hidden />
-        Comparison baseline
-      </span>
-      <span>
-        <i className="sweep-legend-icon sweep-legend-icon--built" aria-hidden />
-        Matches built simulator
-      </span>
-      <span>
         <i className="sweep-legend-icon sweep-legend-icon--pareto" aria-hidden />
-        Pareto-efficient
+        Pareto-efficient (ring)
       </span>
     </div>
   );
+}
+
+function scatterFillForVariant(variant: ScatterPoint["variant"]): string {
+  switch (variant) {
+    case "adaptive":
+      return "#06b6d4";
+    case "fixed_no_inactive":
+      return "#8b5cf6";
+    case "fixed_inactive_x2":
+      return "#eab308";
+    case "fixed_inactive_x5":
+      return "#f97316";
+    default:
+      return "#94a3b8";
+  }
 }
 
 function SweepScatterPlot({
@@ -932,8 +967,6 @@ function SweepScatterPlot({
   subtitle,
   xLabel,
   yLabel,
-  baselinePoint,
-  baselineMatchesBuilt,
   points
 }: {
   axesPopoverTitle: string;
@@ -942,8 +975,6 @@ function SweepScatterPlot({
   subtitle: string;
   xLabel: string;
   yLabel: string;
-  baselinePoint: { x: number; y: number; label: string; tooltip: string; pareto?: boolean };
-  baselineMatchesBuilt: boolean;
   points: ScatterPoint[];
 }) {
   const width = SWEEP_PLOT_WIDTH;
@@ -952,23 +983,28 @@ function SweepScatterPlot({
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
-  const xs = [baselinePoint.x, ...points.map((point) => point.x)];
-  const ys = [baselinePoint.y, ...points.map((point) => point.y)];
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
-  const yMin = Math.min(...ys);
-  const yMax = Math.max(...ys);
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const xMin = xs.length ? Math.min(...xs) : 0;
+  const xMax = xs.length ? Math.max(...xs) : 1;
+  const yMin = ys.length ? Math.min(...ys) : 0;
+  const yMax = ys.length ? Math.max(...ys) : 1;
   const xPad = (xMax - xMin) * 0.08 || 0.02;
   const yPad = (yMax - yMin) * 0.08 || 0.02;
 
   const sx = (x: number) => pad.left + ((x - (xMin - xPad)) / (xMax - xMin + 2 * xPad || 1)) * plotW;
   const sy = (y: number) => pad.top + plotH - ((y - (yMin - yPad)) / (yMax - yMin + 2 * yPad || 1)) * plotH;
 
+  const xDomainLo = xMin - xPad;
+  const xDomainHi = xMax + xPad;
+  const yDomainLo = yMin - yPad;
+  const yDomainHi = yMax + yPad;
+  const xTicks = sweepAxisTicks(xDomainLo, xDomainHi, 5);
+  const yTicks = sweepAxisTicks(yDomainLo, yDomainHi, 5);
+
   const plotCenterX = pad.left + plotW / 2;
   const plotMidY = pad.top + plotH / 2;
   const leftMarginCenterX = pad.left / 2;
-  const bx = sx(baselinePoint.x);
-  const by = sy(baselinePoint.y);
 
   return (
     <figure className="sweep-plot">
@@ -988,48 +1024,49 @@ function SweepScatterPlot({
         aria-label={title}
       >
         <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="rgba(13,22,32,0.6)" stroke="#223245" />
+        {xTicks.map((tick) => {
+          const x = sx(tick);
+          return (
+            <g key={`xt-${tick}`}>
+              <line x1={x} y1={pad.top + plotH} x2={x} y2={pad.top + plotH + 5} stroke="#5c6d7e" strokeWidth={1} />
+              <text
+                x={x}
+                y={pad.top + plotH + 20}
+                fill="#90a4b8"
+                fontSize={SWEEP_PLOT_SVG_FONT_TICK}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {formatSweepScatterXTick(tick)}
+              </text>
+            </g>
+          );
+        })}
+        {yTicks.map((tick) => {
+          const y = sy(tick);
+          return (
+            <g key={`yt-${tick}`}>
+              <line x1={pad.left - 5} y1={y} x2={pad.left} y2={y} stroke="#5c6d7e" strokeWidth={1} />
+              <text x={pad.left - 8} y={y + 4} fill="#90a4b8" fontSize={SWEEP_PLOT_SVG_FONT_TICK} textAnchor="end">
+                {formatSweepScatterYTick(tick)}
+              </text>
+            </g>
+          );
+        })}
         {points.map((point) => {
           const cx = sx(point.x);
           const cy = sy(point.y);
-          const fill = point.variant === "adaptive" ? "#7dd3fc" : "#fbbf24";
-          const isInactiveDouble = point.variant === "fixed_inactivity_double";
+          const fill = scatterFillForVariant(point.variant);
           return (
             <g key={point.id}>
               <title>{point.tooltip}</title>
               {point.pareto ? (
                 <circle cx={cx} cy={cy} r={8} fill="none" stroke="#34d399" strokeWidth={1.75} />
               ) : null}
-              {point.highlight ? (
-                <circle cx={cx} cy={cy} r={11} fill="none" stroke="#a78bfa" strokeWidth={2} />
-              ) : null}
-              {isInactiveDouble ? (
-                <circle cx={cx} cy={cy} r={5.5} fill="none" stroke={fill} strokeWidth={2} opacity={0.95} />
-              ) : (
-                <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.92} />
-              )}
+              <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.95} />
             </g>
           );
         })}
-        <g>
-          <title>{baselinePoint.tooltip}</title>
-          {baselinePoint.pareto ? (
-            <circle cx={bx} cy={by} r={15} fill="none" stroke="#34d399" strokeWidth={1.75} />
-          ) : null}
-          {baselineMatchesBuilt ? <circle cx={bx} cy={by} r={13} fill="none" stroke="#a78bfa" strokeWidth={2} /> : null}
-          <circle
-            cx={bx}
-            cy={by}
-            r={9}
-            fill="#fbbf24"
-            opacity={0.95}
-            stroke="#fef3c7"
-            strokeWidth={2}
-            strokeDasharray="5 4"
-          />
-        </g>
-        <text x={bx + 12} y={by - 10} fill="#e7eef6" fontSize={SWEEP_PLOT_SVG_FONT_BASELINE_LABEL}>
-          {baselinePoint.label}
-        </text>
         <text
           x={plotCenterX}
           y={height - 10}

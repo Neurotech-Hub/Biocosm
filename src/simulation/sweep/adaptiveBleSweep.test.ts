@@ -57,7 +57,7 @@ function roundedEndpoint(
 }
 
 describe("adaptive BLE sweep", () => {
-  it("defaults to quick grid: fixed uses full min–max multiplier range with linspace (3 pts) + ref union; 54 quick adaptives; full adaptive grid is 90", () => {
+  it("defaults to quick grid: fixed uses full min–max multiplier range with linspace (3 pts) + ref union; 36 quick adaptives; full adaptive grid is 90", () => {
     const fullProduct =
       SWEEP_FULL_BASELINE_DRIVES.length *
       SWEEP_FULL_MOTION_WEIGHTS.length *
@@ -69,11 +69,11 @@ describe("adaptive BLE sweep", () => {
       SWEEP_QUICK_PEER_WEIGHTS.length *
       SWEEP_QUICK_TAU_PEER_SECONDS.length;
     expect(fullProduct).toBe(90);
-    expect(quickProduct).toBe(54);
+    expect(quickProduct).toBe(36);
 
-    expect(fixedSweepPolicyCount("quick")).toBe(128);
+    expect(fixedSweepPolicyCount("quick")).toBe(192);
     expect(adaptiveSweepPolicyCount("quick")).toBe(quickProduct);
-    expect(policiesPerSweepSeed("quick")).toBe(128 + quickProduct);
+    expect(policiesPerSweepSeed("quick")).toBe(192 + quickProduct);
     expect(buildSweepGridPolicies("quick", quickSweepAnchors)).toHaveLength(quickProduct);
     expect(buildSweepTrials("fast", "42", { gridVariant: "quick" })).toHaveLength(
       sweepTrialCount("fast", { gridVariant: "quick" })
@@ -81,9 +81,9 @@ describe("adaptive BLE sweep", () => {
     expect(buildSweepTrials("report", "42", { gridVariant: "quick", reportSeedCount: 3 })).toHaveLength(
       sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })
     );
-    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(182);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(546);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(910);
+    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(228);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(684);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(1140);
   });
 
   it("minimal grid: 2-point fixed axes + 2×2×2×2 adaptives for fast smoke tests", () => {
@@ -93,19 +93,31 @@ describe("adaptive BLE sweep", () => {
       SWEEP_MINIMAL_PEER_WEIGHTS.length *
       SWEEP_MINIMAL_TAU_PEER_SECONDS.length;
     expect(minimalProduct).toBe(16);
-    expect(fixedSweepPolicyCount("minimal")).toBe(54);
+    expect(fixedSweepPolicyCount("minimal")).toBe(81);
     expect(adaptiveSweepPolicyCount("minimal")).toBe(16);
-    expect(policiesPerSweepSeed("minimal")).toBe(70);
-    expect(sweepTrialCount("fast", { gridVariant: "minimal" })).toBe(70);
-    expect(buildSweepTrials("fast", "42", { gridVariant: "minimal" })).toHaveLength(70);
-    expect(sweepTrialCount("report", { gridVariant: "minimal", reportSeedCount: 3 })).toBe(210);
+    expect(policiesPerSweepSeed("minimal")).toBe(97);
+    expect(sweepTrialCount("fast", { gridVariant: "minimal" })).toBe(97);
+    expect(buildSweepTrials("fast", "42", { gridVariant: "minimal" })).toHaveLength(97);
+    expect(sweepTrialCount("report", { gridVariant: "minimal", reportSeedCount: 3 })).toBe(291);
   });
 
   it("quick grid includes low-duty and upscale corners (brackets neutral anchor on drive)", () => {
     const policies = buildSweepGridPolicies("quick", quickSweepAnchors);
-    expect(policies.some((p) => p.baselineDrive === 0.12 && p.motionWeight === 0.22 && p.peerWeight === 0.35)).toBe(true);
-    expect(policies.some((p) => p.baselineDrive === 0.45 && p.motionWeight === 0.5 && p.peerWeight === 0.85)).toBe(true);
-    expect(policies.some((p) => p.peerWeight === 0.6 && p.tauPeerSeconds === 300)).toBe(true);
+    expect(policies.some((p) => p.baselineDrive === 0.15 && p.motionWeight === 0.25 && p.peerWeight === 0.35)).toBe(true);
+    expect(policies.some((p) => p.baselineDrive === 0.35 && p.motionWeight === 0.45 && p.peerWeight === 0.85)).toBe(true);
+    expect(policies.some((p) => p.peerWeight === 0.55 && p.tauPeerSeconds === 900)).toBe(true);
+    expect(
+      policies.some(
+        (p) =>
+          p.baselineDrive === 0.25 &&
+          p.motionWeight === 0.45 &&
+          p.peerWeight === 0.55 &&
+          p.tauPeerSeconds === 900 &&
+          p.tauMotionSeconds === 180 &&
+          p.peerGain === 0.45 &&
+          p.peerMissPenalty === 0.2
+      )
+    ).toBe(true);
   });
 
   it("aggregates rows and selects candidates", () => {
@@ -114,6 +126,7 @@ describe("adaptive BLE sweep", () => {
       kind: "baseline_fixed",
       seed: "101",
       doubleWhenInactive: false,
+      inactiveScanIntervalMultiplier: null,
       scheduledScanIntervalSeconds: 20,
       scheduledScanWindowSeconds: 1.5,
       scheduledAdvIntervalSeconds: 5,
@@ -122,10 +135,10 @@ describe("adaptive BLE sweep", () => {
       motionWeight: null,
       peerWeight: null,
       tauPeerSeconds: null,
-      tauMotionSeconds: 120,
+      tauMotionSeconds: 180,
       motionGain: 0.35,
-      peerGain: 0.5,
-      peerMissPenalty: 0.25,
+      peerGain: 0.45,
+      peerMissPenalty: 0.2,
       allowEnergySavingDownscale: true,
       captureRate: 0.5,
       mAhPerDay: 6,
@@ -283,14 +296,23 @@ describe("adaptive BLE sweep", () => {
           t.policy.advIntervalSeconds === 5
       )
     ).toBe(true);
-    expect(fixedSweepPolicyCount("quick", baselineFixedPolicyForSweep(cfg))).toBe(128);
-    expect(policiesPerSweepSeed("quick", baselineFixedPolicyForSweep(cfg))).toBe(182);
-    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: cfg })).toBe(182);
+    expect(fixedSweepPolicyCount("quick", baselineFixedPolicyForSweep(cfg))).toBe(192);
+    expect(policiesPerSweepSeed("quick", baselineFixedPolicyForSweep(cfg))).toBe(228);
+    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: cfg })).toBe(228);
     const dd = trials.find(
       (t) => t.policyId.endsWith("-dd") && t.kind === "fixed_sweep_inactivity_double"
     );
-    expect(dd?.policy.type).toBe("fixed");
-    expect(dd != null && dd.policy.type === "fixed" && dd.policy.doubleWhenInactive === true).toBe(true);
+    expect(dd?.policy).toMatchObject({
+      type: "fixed",
+      doubleWhenInactive: true,
+      inactiveScanIntervalMultiplier: 2
+    });
+    const i5 = trials.find((t) => t.policyId.endsWith("-i5") && t.kind === "fixed_sweep_inactive_scan_x5");
+    expect(i5?.policy).toMatchObject({
+      type: "fixed",
+      doubleWhenInactive: true,
+      inactiveScanIntervalMultiplier: 5
+    });
   });
 });
 

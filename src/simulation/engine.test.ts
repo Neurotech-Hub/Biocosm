@@ -510,7 +510,7 @@ describe("simulation engine", () => {
     expect(neutral.advIntervalSeconds).toBeCloseTo(5);
     expect(low.scanIntervalSeconds).toBeGreaterThan(neutral.scanIntervalSeconds);
     expect(low.scanWindowSeconds).toBeLessThan(neutral.scanWindowSeconds);
-    expect(low.advIntervalSeconds).toBeGreaterThan(neutral.advIntervalSeconds);
+    expect(low.advIntervalSeconds).toBeCloseTo(neutral.advIntervalSeconds, 5);
     expect(high.scanIntervalSeconds).toBeLessThan(neutral.scanIntervalSeconds);
     expect(high.scanWindowSeconds).toBeGreaterThan(neutral.scanWindowSeconds);
     expect(high.advIntervalSeconds).toBeLessThan(neutral.advIntervalSeconds);
@@ -831,7 +831,8 @@ function animalAt(id: string, x: number, y: number): Animal {
       peerDrive: 0,
       samplingDrive: 0,
       lastScanTime: 0,
-      lastAdvTime: 0
+      lastAdvTime: 0,
+      noMotionStreakSeconds: 0
     },
     boutRemainingSeconds: 0,
     recentNodeIds: [],

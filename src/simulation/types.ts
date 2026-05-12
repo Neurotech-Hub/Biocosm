@@ -88,6 +88,8 @@ export type CollarState = {
   lastScanTime: number;
   lastAdvTime: number;
   lastPeerDetectionTime?: number;
+  /** Consecutive simulated seconds without motion this epoch chain (resets when motion is detected). */
+  noMotionStreakSeconds: number;
 };
 
 export type Animal = {
@@ -196,16 +198,23 @@ export type FixedPolicyConfig = {
   advIntervalSeconds: number;
   /** On-air advertising burst length (firmware ADV_BURST_DURATION_MS / 1000). Default 2 s if omitted. */
   advertisingBurstDurationSeconds?: number;
-  /** When true, scan and advertising intervals double for epochs where motion is not detected (fixed-rate quasi-adaptive). */
+  /**
+   * When true, after each animal's consecutive no-motion time reaches its **movement bout mean** (minutes, sampled
+   * trait), **scan interval only** is multiplied by `inactiveScanIntervalMultiplier` until motion resumes.
+   */
   doubleWhenInactive?: boolean;
+  /** Scan interval multiplier when inactive stretch applies (2–5). Ignored unless `doubleWhenInactive`. Defaults to 2. */
+  inactiveScanIntervalMultiplier?: 2 | 3 | 4 | 5;
 };
 
-/** BLE sweep trial policy category (baseline vs grid vs adaptive; inactivity-double pairs each fixed-rate row). */
+/** BLE sweep trial policy category (baseline vs grid vs adaptive; each fixed-rate combo has no / inactive×2 / inactive×5 rows). */
 export type SweepPolicyKind =
   | "baseline_fixed"
   | "fixed_sweep"
   | "baseline_fixed_inactivity_double"
   | "fixed_sweep_inactivity_double"
+  | "baseline_fixed_inactive_scan_x5"
+  | "fixed_sweep_inactive_scan_x5"
   | "adaptive";
 
 export type AdaptiveBleTiming = {
@@ -419,6 +428,8 @@ export type SimulationState = {
   scanWindows: ScanWindowLog[];
   advertisingEvents: AdvertisingEvent[];
   energy: EnergyLog;
+  /** Per-animal cumulative mAh used; cohort-mean `energy` logs average per-step `computeEnergyLog` outputs. */
+  animalEnergyCumulativeMah: Record<string, number>;
   logs: SimulationLogs;
   rngState: number;
 };
@@ -447,7 +458,7 @@ export type SimulationMetrics = {
   meanSamplingDrive: number;
   meanScanIntervalSeconds: number;
   energyUsedMah: number;
-  /** Time-averaged current draw (µA) from cumulative mAh — one representative collar. */
+  /** Time-averaged current draw (µA) from cohort-mean cumulative mAh in logs. */
   meanEnergyCurrentMicroAmpsPerCollar: number;
   batteryRemainingPercent: number;
   estimatedVoltage: number;

@@ -34,18 +34,18 @@ const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
 export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(generalDiscoveryPreset);
 
 /**
- * Optional fixed row (e.g. after a sweep): faster scan/adv than catalog general-discovery, with inactive ×2.
- * Not used as the app default — that schedule raises capture and energy vs `generalDiscoveryFixedPolicy`.
+ * Optional fixed row (e.g. after a sweep): faster scan/adv than catalog general-discovery, with bout-delayed inactive scan ×2.
  */
 export const sweepStyleFixedProximityDdPolicy: FixedPolicyConfig = {
   type: "fixed",
   id: "sweep-fixed-s5-a1.25-w0.5-dd",
-  name: "Fixed 5s scan / 0.5s win / 1.25s adv — inactive ×2",
+  name: "Fixed 5s scan / 0.5s win / 1.25s adv — inactive scan ×2",
   scanIntervalSeconds: 5,
   scanWindowSeconds: 0.5,
   advIntervalSeconds: 1.25,
   advertisingBurstDurationSeconds: 2,
-  doubleWhenInactive: true
+  doubleWhenInactive: true,
+  inactiveScanIntervalMultiplier: 2
 };
 
 const defaultAdaptiveAnchors = buildAdaptiveAnchorsFromBaseline(generalDiscoveryPreset);

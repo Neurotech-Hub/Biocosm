@@ -109,7 +109,10 @@ export type AdaptiveBleTimePoint = {
   meanScanIntervalSeconds: number;
 };
 
-/** Fixed-rate schedule copied from policy (flat series over time). */
+/**
+ * Fixed-rate schedule over time: **cohort mean** of per-collar applied timings from each simulation state
+ * (so inactive scan stretch and other per-animal differences show in the plot).
+ */
 export type FixedBleTimePoint = {
   time: number;
   scanIntervalSeconds: number;
@@ -154,15 +157,31 @@ export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTi
     }));
   }
   const advBurst = policy.advertisingBurstDurationSeconds ?? 2;
-  const envelopeDuty =
-    policy.scanWindowSeconds / policy.scanIntervalSeconds + advBurst / policy.advIntervalSeconds;
-  return timeline.map((state) => ({
-    time: state.time,
-    scanIntervalSeconds: policy.scanIntervalSeconds,
-    advIntervalSeconds: policy.advIntervalSeconds,
-    scanWindowSeconds: policy.scanWindowSeconds,
-    envelopeDuty
-  }));
+  return timeline.map((state) => {
+    const n = Math.max(1, state.animals.length);
+    let sumScan = 0;
+    let sumAdv = 0;
+    let sumWin = 0;
+    for (const animal of state.animals) {
+      sumScan += animal.collar.scanIntervalSeconds;
+      sumAdv += animal.collar.advIntervalSeconds;
+      sumWin += animal.collar.scanWindowSeconds;
+    }
+    const scanIntervalSeconds = sumScan / n;
+    const advIntervalSeconds = sumAdv / n;
+    const scanWindowSeconds = sumWin / n;
+    const envelopeDuty =
+      scanIntervalSeconds > 1e-9 && advIntervalSeconds > 1e-9
+        ? scanWindowSeconds / scanIntervalSeconds + advBurst / advIntervalSeconds
+        : 0;
+    return {
+      time: state.time,
+      scanIntervalSeconds,
+      advIntervalSeconds,
+      scanWindowSeconds,
+      envelopeDuty
+    };
+  });
 }
 
 export function buildTimeSeries(timeline: SimulationState[]): TimeSeriesPoint[] {

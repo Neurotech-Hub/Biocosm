@@ -64,12 +64,15 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
     const burstA = active.advertisingBurstDurationSeconds ?? 2;
     const pInactive = p.doubleWhenInactive === true;
     const aInactive = active.doubleWhenInactive === true;
+    const pMult = p.inactiveScanIntervalMultiplier ?? 2;
+    const aMult = active.inactiveScanIntervalMultiplier ?? 2;
     return (
       nearlyEqual(p.scanIntervalSeconds, active.scanIntervalSeconds) &&
       nearlyEqual(p.scanWindowSeconds, active.scanWindowSeconds) &&
       nearlyEqual(p.advIntervalSeconds, active.advIntervalSeconds) &&
       nearlyEqual(burstP, burstA) &&
-      pInactive === aInactive
+      pInactive === aInactive &&
+      (!pInactive || pMult === aMult)
     );
   }
   return false;
@@ -138,14 +141,19 @@ export function OptimizerPanel({
 
   const observedCaptureEnergy = useMemo((): OptimizerScatterObserved[] => {
     return summariesRanked.map((summary) => {
-      let variant: OptimizerScatterObserved["variant"] = "fixed_sweep";
+      let variant: OptimizerScatterObserved["variant"] = "fixed_no_inactive";
       if (summary.kind === "adaptive") {
         variant = "adaptive";
       } else if (
         summary.kind === "fixed_sweep_inactivity_double" ||
         summary.kind === "baseline_fixed_inactivity_double"
       ) {
-        variant = "fixed_inactivity_double";
+        variant = "fixed_inactive_x2";
+      } else if (
+        summary.kind === "fixed_sweep_inactive_scan_x5" ||
+        summary.kind === "baseline_fixed_inactive_scan_x5"
+      ) {
+        variant = "fixed_inactive_x5";
       }
       return {
         x: summary.meanMahPerDay,

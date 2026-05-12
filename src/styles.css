@@ -791,6 +791,46 @@ input[type="range"] {
   margin: 0 0 10px;
 }
 
+.chart-card-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+
+.chart-card-heading-row .chart-card-title {
+  margin: 0;
+  flex: 1 1 200px;
+}
+
+.chart-energy-mode-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  font-size: 0.82rem;
+  color: #90a4b8;
+}
+
+.chart-energy-mode-toggle-label {
+  font-weight: 600;
+  color: #b8c5d4;
+}
+
+.chart-energy-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chart-energy-mode-option input {
+  margin: 0;
+}
+
 .time-series-chart-card .strip-chart {
   margin-bottom: 6px;
 }
@@ -1091,6 +1131,10 @@ input[type="range"] {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.metrics-panel-footnote {
+  margin: 22px 0 0;
 }
 
 .legend-grid {
@@ -1404,11 +1448,16 @@ th {
   width: 100%;
 }
 
+.workspace.workspace-sweep-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+}
+
 .sweep-report-panel {
   background: #101923;
   border: 1px solid #223245;
   border-radius: 14px;
   box-sizing: border-box;
+  min-width: 0;
   padding: 18px 20px 24px;
   width: 100%;
 }
@@ -1883,8 +1932,35 @@ th {
   width: 12px;
 }
 
+.sweep-legend-icon--fixed-no-inactive {
+  background: #8b5cf6;
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  opacity: 0.95;
+  width: 10px;
+}
+
+.sweep-legend-icon--fixed-inactive-x2 {
+  background: #eab308;
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  opacity: 0.95;
+  width: 10px;
+}
+
+.sweep-legend-icon--fixed-inactive-x5 {
+  background: #f97316;
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  opacity: 0.95;
+  width: 10px;
+}
+
 .sweep-legend-icon--adaptive {
-  background: #7dd3fc;
+  background: #06b6d4;
   border-radius: 50%;
   display: inline-block;
   height: 10px;
@@ -2029,7 +2105,17 @@ th {
 }
 
 .sweep-table {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
+}
+
+.sweep-table th,
+.sweep-table td {
+  padding: 7px 8px;
+}
+
+.sweep-pareto-bool-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 .sweep-alg {
@@ -2059,6 +2145,12 @@ th {
   background: rgba(251, 191, 36, 0.06);
   border: 1px dashed rgba(251, 191, 36, 0.5);
   color: #fcd34d;
+}
+
+.sweep-alg-fixed-i5 {
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.45);
+  color: #fdba74;
 }
 
 .sweep-alg-adaptive {

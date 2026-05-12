@@ -23,6 +23,7 @@ export function createInitialSimulation(config: SimulationConfig): SimulationSta
     createAnimal(index, pathGraph, config, rng)
   );
   const animals = buildValidatedBehaviorSchedules(animalsWithoutSchedules, config);
+  const animalEnergyCumulativeMah = Object.fromEntries(animals.map((a) => [a.id, 0]));
 
   return {
     time: 0,
@@ -45,6 +46,7 @@ export function createInitialSimulation(config: SimulationConfig): SimulationSta
       remainingPercent: 1,
       estimatedVoltage: config.energy.startingVoltage
     },
+    animalEnergyCumulativeMah,
     logs: createEmptyLogs(),
     rngState: rng.getState()
   };
@@ -213,7 +215,8 @@ function createAnimal(
       peerDrive: 0,
       samplingDrive: 0,
       lastScanTime: scanPhaseOffsetSeconds - policyTiming.scanIntervalSeconds,
-      lastAdvTime: advPhaseOffsetSeconds - policyTiming.advIntervalSeconds
+      lastAdvTime: advPhaseOffsetSeconds - policyTiming.advIntervalSeconds,
+      noMotionStreakSeconds: 0
     },
     boutRemainingSeconds: initialBoutRemainingSeconds(initialState, traits, rng),
     recentNodeIds: [startNode.id],

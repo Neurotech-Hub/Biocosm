@@ -1,6 +1,6 @@
 import { summarizeDyadEpoch } from "./dyadEpoch";
 import { getEdge, interpolateEdge } from "./geometry";
-import { computeEnergyLog } from "./energy";
+import { computeEnergyLog, meanEnergyLog } from "./energy";
 import { computeMotionObservations } from "./motionSensor";
 import { adaptivePolicyInputsForAnimal, applyFirmwarePolicy, combinedEnvelopeDuty } from "./policies/adaptive";
 import { SeededRandom } from "./random";
@@ -38,7 +38,17 @@ export function stepSimulation(state: SimulationState): SimulationState {
   const movedAnimals = updateAnimalPositions(state.animals, state, absoluteTime, dtSeconds, rng);
   const observations = computeMotionObservations(time, state.animals, movedAnimals, state.config.motionSensor, rng);
   const observationByAnimal = new Map(observations.map((observation) => [observation.animalId, observation]));
-  const animalsWithPolicy = movedAnimals.map((animal) =>
+  const animalsWithMotionStreak = movedAnimals.map((animal) => {
+    const observation = observationByAnimal.get(animal.id);
+    const prev = animalsAtEpochStart.find((a) => a.id === animal.id);
+    const motion = observation?.motionDetected ?? false;
+    const noMotionStreakSeconds = motion ? 0 : (prev?.collar.noMotionStreakSeconds ?? 0) + dtSeconds;
+    return {
+      ...animal,
+      collar: { ...animal.collar, noMotionStreakSeconds }
+    };
+  });
+  const animalsWithPolicy = animalsWithMotionStreak.map((animal) =>
     applyFirmwarePolicy(
       animal,
       state.config.activePolicy,
@@ -64,7 +74,6 @@ export function stepSimulation(state: SimulationState): SimulationState {
     state.config.bleScheduling
   );
   const animalsWithBurstState = applyBurstState(animalsWithPolicy, bleBursts);
-  const energyBursts = energyBurstsForRepresentativeCollar(animalsWithBurstState, bleBursts);
   const advInterval = state.config.energy.advertisingEventIntervalSeconds;
   const trueContacts = computeTrueContacts(animalsWithBurstState, state.config.radio, time);
   const scanWindowEvents = createScanWindowEventsFromBursts(bleBursts);
@@ -81,7 +90,20 @@ export function stepSimulation(state: SimulationState): SimulationState {
     advInterval
   );
   const scanWindows = createScanWindowLogs(scanWindowEvents, detections);
-  const energy = computeEnergyLog(time, dtSeconds, energyBursts, state.config.energy, state.energy.cumulativeMah);
+  const perAnimalEnergyLogs = animalsWithBurstState.map((animal) => {
+    const burstsForAnimal = bleBursts.filter((burst) => burst.animalId === animal.id);
+    const prevCumulative = state.animalEnergyCumulativeMah[animal.id] ?? 0;
+    return computeEnergyLog(time, dtSeconds, burstsForAnimal, state.config.energy, prevCumulative);
+  });
+  const nextAnimalEnergyCumulativeMah = { ...state.animalEnergyCumulativeMah };
+  for (let i = 0; i < animalsWithBurstState.length; i += 1) {
+    const animal = animalsWithBurstState[i]!;
+    const row = perAnimalEnergyLogs[i];
+    if (row) {
+      nextAnimalEnergyCumulativeMah[animal.id] = row.cumulativeMah;
+    }
+  }
+  const energy = meanEnergyLog(time, perAnimalEnergyLogs);
   const frameLogs = {
     animalStates: createAnimalStateLogs(time, animalsWithBurstState, observations),
     trueDyads: createTrueDyadLogs(
@@ -118,6 +140,7 @@ export function stepSimulation(state: SimulationState): SimulationState {
     scanWindows,
     advertisingEvents,
     energy,
+    animalEnergyCumulativeMah: nextAnimalEnergyCumulativeMah,
     logs: frameLogs,
     rngState: rng.getState()
   };
@@ -166,14 +189,6 @@ export function mergeLogs(left: SimulationState["logs"], right: SimulationState[
     collarStates: [...left.collarStates, ...right.collarStates],
     energy: [...left.energy, ...right.energy]
   };
-}
-
-function energyBurstsForRepresentativeCollar(animals: Animal[], bursts: BleBurstEvent[]): BleBurstEvent[] {
-  const rep = animals.find((animal) => animal.collar.valid) ?? animals[0];
-  if (!rep) {
-    return [];
-  }
-  return bursts.filter((burst) => burst.animalId === rep.id);
 }
 
 function applyBurstState(animals: Animal[], bursts: BleBurstEvent[]): Animal[] {

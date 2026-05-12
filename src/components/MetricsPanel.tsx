@@ -35,8 +35,9 @@ export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: Metri
             <dd>Firmware-style scan windows scheduled across the whole run. Negative windows are scans that found no peer.</dd>
             <dt>Energy and battery</dt>
             <dd>
-              Representative-collar estimates, not fleet totals. Capture/mAh is BLE capture hits per mAh used. Device
-              lifetime assumes constant mean draw over 24 h and full usable pack capacity.
+              Cohort mean across simulated animals: each timestep averages per-collar energy logs. Capture/mAh uses
+              that mean cumulative drain. Device lifetime assumes constant mean draw over 24 h and full usable pack
+              capacity per device.
             </dd>
           </dl>
         </InfoPopover>
@@ -73,7 +74,7 @@ export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: Metri
           <Metric label="Scan windows / animal" value={scanEffort.toFixed(1)} />
         </MetricSection>
 
-        <MetricSection title="Energy (Representative Collar)">
+        <MetricSection title="Energy (cohort mean)">
           <Metric label="Energy used" value={`${metrics.energyUsedMah.toFixed(3)} mAh`} />
           <Metric label="Battery remaining" value={`${Math.round(metrics.batteryRemainingPercent * 100)}%`} />
           <Metric label="Estimated voltage" value={`${metrics.estimatedVoltage.toFixed(2)} V`} />
@@ -85,13 +86,11 @@ export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: Metri
         </MetricSection>
       </div>
       {metrics.energyModelWarning ? <p className="helper-text">{metrics.energyModelWarning}</p> : null}
-      <p className="helper-text">
-        BLE energy and battery numbers model a <strong>single representative collar</strong> (first valid animal in the
-        list), not a fleet total — match these to per-device figures on the datasheet.
-      </p>
-      <p className="helper-text">
-        Raw detection density and interval capture rate are separate measures: capture is bounded by opportunity epochs;
-        raw density counts detection events.
+      <p className="helper-text metrics-panel-footnote">
+        BLE energy and battery numbers are <strong>cohort means</strong> (per timestep, average across all simulated
+        animals): use them for population-average drain and voltage; match per-device datasheet figures to a single
+        animal’s trajectory in logs if needed. Raw detection density and interval capture rate are separate measures,
+        with capture bounded by opportunity epochs and raw density counting detection events.
       </p>
     </section>
   );

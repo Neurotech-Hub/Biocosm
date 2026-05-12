@@ -75,6 +75,8 @@ function createPlaceholderBuild(initial: SimulationState): SimulationBuild {
 
 export function App() {
   const activeBuildIdRef = useRef(0);
+  /** Bumped when a new sweep run starts or workspace load supersedes in-flight work; stale runs must not set or restore `sweepResult`. */
+  const sweepRunGenerationRef = useRef(0);
 
   const [draftConfig, setDraftConfig] = useState<SimulationConfig>(defaultSimulationConfig);
   const [builtConfig, setBuiltConfig] = useState<SimulationConfig>(defaultSimulationConfig);
@@ -168,6 +170,9 @@ export function App() {
 
   const runSweep = async () => {
     setSweepError(null);
+    /** If this run fails or is cancelled, restore the bundle that was showing before (avoids losing results without a reload). */
+    const sweepResultBeforeRun = sweepResult;
+    const myGeneration = ++sweepRunGenerationRef.current;
     setSweepResult(null);
     const trials = buildSweepTrials(sweepMode, String(builtConfig.seed), {
       gridVariant: sweepGridVariant,
@@ -184,13 +189,19 @@ export function App() {
         signal: controller.signal,
         onProgress: (completed, total) => setSweepProgress({ completed, total })
       });
-      setSweepResult(finalizeSweepBundle(rows, sweepMode));
+      if (sweepRunGenerationRef.current === myGeneration) {
+        setSweepResult(finalizeSweepBundle(rows, sweepMode));
+      }
     } catch (error) {
+      if (sweepRunGenerationRef.current !== myGeneration) {
+        return;
+      }
       if (error instanceof DOMException && error.name === "AbortError") {
         setSweepError("Sweep cancelled.");
       } else {
         setSweepError(error instanceof Error ? error.message : String(error));
       }
+      setSweepResult(sweepResultBeforeRun);
     } finally {
       setSweepRunning(false);
       sweepAbortRef.current = null;
@@ -235,6 +246,7 @@ export function App() {
 
   const startWorkspaceLoad = (params: WorkspaceLoadParams) => {
     activeBuildIdRef.current += 1;
+    sweepRunGenerationRef.current += 1;
     sweepAbortRef.current?.abort();
     setSweepRunning(false);
     setSweepError(null);

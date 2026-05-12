@@ -22,6 +22,12 @@ describe("BLE baseline vs hardware energy separation", () => {
     expect(neutral.advIntervalSeconds).toBeCloseTo(5);
   });
 
+  it("low-intensity anchor keeps frequent advertising (60s scan / 5s adv)", () => {
+    const low = mapAdaptiveTiming(0, defaultAdaptivePolicy.timingAnchors);
+    expect(low.scanIntervalSeconds).toBeCloseTo(60);
+    expect(low.scanWindowSeconds).toBeCloseTo(0.75);
+    expect(low.advIntervalSeconds).toBeCloseTo(5);
+  });
   it("sweep includes baseline_fixed row for selected BLE preset id", () => {
     const trials = buildSweepTrials("fast", "42", {
       gridVariant: "quick",
