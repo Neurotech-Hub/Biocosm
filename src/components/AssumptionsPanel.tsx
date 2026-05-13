@@ -50,8 +50,10 @@ export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
               metric.
             </li>
             <li>
-              Energy estimates model a representative collar using steady baseline draw plus RX scan listening and TX
-              advertising event charge, with optional calibration against the Juxta 5 s advertise / 20 s scan reference.
+              Energy uses a bench-calibrated duration model: each timestep adds shelf draw plus advertise and scan burst
+              wall times multiplied by currents derived from Juxta5-8 README measurements (scaled so the default 1 s
+              advertise / 20 s scan routine matches the measured production mean). Hardware assumes <strong>+8 dBm</strong>{" "}
+              TX for RSSI priors; that gain is not an energy slider in this mode.
             </li>
             <li>
               Raw BLE detections are behavior- and schedule-dependent observations; they should not be interpreted as

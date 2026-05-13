@@ -19,8 +19,8 @@ export type SweepPolicyParams =
       advertisingBurstDurationSeconds?: number;
       /** When true, inactive scan stretch (bout-delayed) matches a sweep row with inactive multiplier. */
       doubleWhenInactive?: boolean;
-      /** Scan interval multiplier when inactive stretch applies (sweep uses 2 or 5). */
-      inactiveScanIntervalMultiplier?: 2 | 3 | 4 | 5;
+      /** Scan interval multiplier when inactive stretch applies (sweep uses 1.5, 2, 3, or 5). */
+      inactiveScanIntervalMultiplier?: 1.5 | 2 | 3 | 4 | 5 | "inf";
     };
 
 export type SweepPolicySummary = {
@@ -122,9 +122,9 @@ export function pickSweepCandidates(
   const fixedExtras = summaries.filter(
     (row) =>
       row.kind === "fixed_sweep" ||
-      row.kind === "fixed_sweep_inactivity_double" ||
+      row.kind === "fixed_sweep_inactive_scan_x3" ||
       row.kind === "fixed_sweep_inactive_scan_x5" ||
-      row.kind === "baseline_fixed_inactivity_double" ||
+      row.kind === "baseline_fixed_inactive_scan_x3" ||
       row.kind === "baseline_fixed_inactive_scan_x5"
   );
 

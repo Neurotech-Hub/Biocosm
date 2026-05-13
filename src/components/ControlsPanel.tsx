@@ -159,21 +159,16 @@ export function ControlsPanel({
   useEffect(() => {
     const norm = normalizeHardwareEnergyProfileId(config.hardwareEnergyProfileId);
     const safeId = hardwareEnergyProfiles[norm] ? norm : DEFAULT_HARDWARE_ENERGY_PROFILE_ID;
-    const idChanged = safeId !== config.hardwareEnergyProfileId;
-    const modelBad = config.energy.energyModel !== "component";
-    if (!idChanged && !modelBad) {
+    if (safeId === config.hardwareEnergyProfileId) {
       return;
     }
     const next: SimulationConfig = {
       ...config,
-      hardwareEnergyProfileId: safeId,
-      energy: { ...config.energy, energyModel: "component" }
+      hardwareEnergyProfileId: safeId
     };
-    if (idChanged) {
-      applyHardwareProfileToEnergy(next);
-    }
+    applyHardwareProfileToEnergy(next);
     onConfigChange(next);
-  }, [config.hardwareEnergyProfileId, config.energy.energyModel]);
+  }, [config.hardwareEnergyProfileId]);
 
   const syncFixedPolicyAndPreset = (fixed: FixedPolicyConfig) => {
     onConfigChange({
@@ -184,6 +179,7 @@ export function ControlsPanel({
   };
 
   const neutralBaseline = bleBaselinePresetDefForSweep(config);
+  const isBenchDurationEnergy = config.energy.energyModel === "bench_duration";
 
   return (
     <aside className={`panel controls-panel${isBuildDirty ? " controls-panel--stale" : ""}`}>
@@ -723,27 +719,44 @@ export function ControlsPanel({
             <label>
               Inactive scan multiplier
               <select
-                value={String(fixedPolicy.inactiveScanIntervalMultiplier ?? 2)}
-                onChange={(event) =>
+                value={
+                  fixedPolicy.inactiveScanIntervalMultiplier === "inf"
+                    ? "inf"
+                    : String(fixedPolicy.inactiveScanIntervalMultiplier ?? 2)
+                }
+                onChange={(event) => {
+                  const raw = event.target.value;
                   syncFixedPolicyAndPreset({
                     ...fixedPolicy,
                     doubleWhenInactive: true,
-                    inactiveScanIntervalMultiplier: Number(event.target.value) as 2 | 3 | 4 | 5
-                  })
-                }
+                    inactiveScanIntervalMultiplier:
+                      raw === "inf" ? "inf" : (Number(raw) as 2 | 3 | 4 | 5)
+                  });
+                }}
               >
                 <option value="2">2×</option>
                 <option value="3">3×</option>
                 <option value="4">4×</option>
                 <option value="5">5×</option>
+                <option value="inf">Inf (no scan if no motion last epoch)</option>
               </select>
             </label>
           ) : null}
           <p className="helper-text">
-            After each animal's collar reports <strong>no motion</strong> continuously for at least its sampled{" "}
-            <strong>movement bout mean</strong> (minutes, from the species preset), only the <strong>scan interval</strong> is
-            multiplied by the selected factor until motion resumes (quasi-adaptive on top of fixed-rate schedules). Advertising
-            stays on the nominal schedule.
+            {fixedPolicy.inactiveScanIntervalMultiplier === "inf" ? (
+              <>
+                With <strong>Inf</strong>, whenever the last simulation step had <strong>no motion</strong> for this animal,
+                its <strong>scan window is set to zero</strong> for that step (no listen), while advertising stays on the
+                nominal schedule. One epoch is one <strong>time step</strong> (e.g. 60 s with default settings).
+              </>
+            ) : (
+              <>
+                After each animal's collar reports <strong>no motion</strong> continuously for at least its sampled{" "}
+                <strong>movement bout mean</strong> (minutes, from the species preset), only the <strong>scan interval</strong>{" "}
+                is multiplied by the selected factor until motion resumes (quasi-adaptive on top of fixed-rate schedules).
+                Advertising stays on the nominal schedule.
+              </>
+            )}
           </p>
         </>
         ) : adaptivePolicy ? (
@@ -969,96 +982,134 @@ export function ControlsPanel({
 
       <section className="control-section">
         <h3>Energy / Battery</h3>
-        <p className="helper-text">
-          Component model: baseline µA plus scan (RX × listen-window seconds) and advertising (packet events × µC/event)
-          for <strong>one representative collar</strong>.
-        </p>
-        <p className="helper-text">
-          <strong>Hardware energy profile:</strong>{" "}
-          {hardwareEnergyProfiles[DEFAULT_HARDWARE_ENERGY_PROFILE_ID]?.label ?? "Generic nRF52840 BLE wearable"}
-        </p>
-        <p className="helper-text">
-          Maps radio activity to current and pack size. Independent from the BLE schedule / policy baseline above.
-        </p>
-        <label>
-          Assumed TX power (label / prior): {config.energy.txPowerDbm} dBm
-          <input
-            type="range"
-            min="-4"
-            max="8"
-            step="1"
-            value={config.energy.txPowerDbm}
-            onChange={(event) => updateEnergyConfig("txPowerDbm", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Battery capacity: {config.energy.batteryCapacityMah} mAh
-          <input
-            type="range"
-            min="20"
-            max="1000"
-            step="10"
-            value={config.energy.batteryCapacityMah}
-            onChange={(event) => updateEnergyConfig("batteryCapacityMah", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Starting voltage: {config.energy.startingVoltage.toFixed(2)} V
-          <input
-            type="range"
-            min="3.7"
-            max="4.2"
-            step="0.01"
-            value={config.energy.startingVoltage}
-            onChange={(event) => updateEnergyConfig("startingVoltage", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Baseline (non-BLE): {config.energy.baselineCurrentMicroAmps.toFixed(0)} µA
-          <input
-            type="range"
-            min="10"
-            max="500"
-            step="5"
-            value={config.energy.baselineCurrentMicroAmps}
-            onChange={(event) => updateEnergyConfig("baselineCurrentMicroAmps", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Scan RX current: {config.energy.rxCurrentMa1MPhy.toFixed(2)} mA
-          <input
-            type="range"
-            min="3"
-            max="10"
-            step="0.05"
-            value={config.energy.rxCurrentMa1MPhy}
-            onChange={(event) => updateEnergyConfig("rxCurrentMa1MPhy", Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Advertising event spacing: {config.energy.advertisingEventIntervalSeconds.toFixed(2)} s (detection grid)
-          <input
-            type="range"
-            min="0.05"
-            max="0.25"
-            step="0.01"
-            value={config.energy.advertisingEventIntervalSeconds}
-            onChange={(event) =>
-              updateEnergyConfig("advertisingEventIntervalSeconds", Number(event.target.value))
-            }
-          />
-        </label>
-        <label>
-          Advertising event charge: {config.energy.advEventChargeMicroCoulombs.toFixed(1)} µC
-          <input
-            type="range"
-            min="5"
-            max="25"
-            step="0.5"
-            value={config.energy.advEventChargeMicroCoulombs}
-            onChange={(event) => updateEnergyConfig("advEventChargeMicroCoulombs", Number(event.target.value))}
-          />
-        </label>
+        {isBenchDurationEnergy ? (
+          <>
+            <p className="helper-text">
+              Bench-calibrated model: per epoch, shelf draw plus advertise and scan burst <strong>wall times</strong>{" "}
+              multiplied by currents derived from Juxta5-8 README measurements (calibrated so the default 1 s adv / 20 s
+              scan routine matches the production mean). Radio is assumed at <strong>+8 dBm</strong> (fixed).
+            </p>
+            <p className="helper-text">
+              <strong>Hardware energy profile:</strong>{" "}
+              {hardwareEnergyProfiles[DEFAULT_HARDWARE_ENERGY_PROFILE_ID]?.label ?? "Generic nRF52840 BLE wearable"}
+            </p>
+            <label>
+              Battery capacity: {config.energy.batteryCapacityMah} mAh
+              <input
+                type="range"
+                min="20"
+                max="1000"
+                step="10"
+                value={config.energy.batteryCapacityMah}
+                onChange={(event) => updateEnergyConfig("batteryCapacityMah", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Starting voltage: {config.energy.startingVoltage.toFixed(2)} V
+              <input
+                type="range"
+                min="3.7"
+                max="4.2"
+                step="0.01"
+                value={config.energy.startingVoltage}
+                onChange={(event) => updateEnergyConfig("startingVoltage", Number(event.target.value))}
+              />
+            </label>
+          </>
+        ) : (
+          <>
+            <p className="helper-text">
+              Component model: baseline µA plus scan (RX × listen-window seconds) and advertising (packet events ×
+              µC/event) for <strong>one representative collar</strong>.
+            </p>
+            <p className="helper-text">
+              <strong>Hardware energy profile:</strong>{" "}
+              {hardwareEnergyProfiles[DEFAULT_HARDWARE_ENERGY_PROFILE_ID]?.label ?? "Generic nRF52840 BLE wearable"}
+            </p>
+            <p className="helper-text">
+              Maps radio activity to current and pack size. Independent from the BLE schedule / policy baseline above.
+            </p>
+            <label>
+              Assumed TX power (label / prior): {config.energy.txPowerDbm} dBm
+              <input
+                type="range"
+                min="-4"
+                max="8"
+                step="1"
+                value={config.energy.txPowerDbm}
+                onChange={(event) => updateEnergyConfig("txPowerDbm", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Battery capacity: {config.energy.batteryCapacityMah} mAh
+              <input
+                type="range"
+                min="20"
+                max="1000"
+                step="10"
+                value={config.energy.batteryCapacityMah}
+                onChange={(event) => updateEnergyConfig("batteryCapacityMah", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Starting voltage: {config.energy.startingVoltage.toFixed(2)} V
+              <input
+                type="range"
+                min="3.7"
+                max="4.2"
+                step="0.01"
+                value={config.energy.startingVoltage}
+                onChange={(event) => updateEnergyConfig("startingVoltage", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Baseline (non-BLE): {config.energy.baselineCurrentMicroAmps.toFixed(0)} µA
+              <input
+                type="range"
+                min="10"
+                max="500"
+                step="5"
+                value={config.energy.baselineCurrentMicroAmps}
+                onChange={(event) => updateEnergyConfig("baselineCurrentMicroAmps", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Scan RX current: {config.energy.rxCurrentMa1MPhy.toFixed(2)} mA
+              <input
+                type="range"
+                min="3"
+                max="10"
+                step="0.05"
+                value={config.energy.rxCurrentMa1MPhy}
+                onChange={(event) => updateEnergyConfig("rxCurrentMa1MPhy", Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Advertising event spacing: {config.energy.advertisingEventIntervalSeconds.toFixed(2)} s (detection grid)
+              <input
+                type="range"
+                min="0.05"
+                max="0.25"
+                step="0.01"
+                value={config.energy.advertisingEventIntervalSeconds}
+                onChange={(event) =>
+                  updateEnergyConfig("advertisingEventIntervalSeconds", Number(event.target.value))
+                }
+              />
+            </label>
+            <label>
+              Advertising event charge: {config.energy.advEventChargeMicroCoulombs.toFixed(1)} µC
+              <input
+                type="range"
+                min="5"
+                max="25"
+                step="0.5"
+                value={config.energy.advEventChargeMicroCoulombs}
+                onChange={(event) => updateEnergyConfig("advEventChargeMicroCoulombs", Number(event.target.value))}
+              />
+            </label>
+          </>
+        )}
       </section>
     </aside>
   );

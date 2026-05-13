@@ -145,10 +145,10 @@ export function OptimizerPanel({
       if (summary.kind === "adaptive") {
         variant = "adaptive";
       } else if (
-        summary.kind === "fixed_sweep_inactivity_double" ||
-        summary.kind === "baseline_fixed_inactivity_double"
+        summary.kind === "fixed_sweep_inactive_scan_x3" ||
+        summary.kind === "baseline_fixed_inactive_scan_x3"
       ) {
-        variant = "fixed_inactive_x2";
+        variant = "fixed_inactive_x3";
       } else if (
         summary.kind === "fixed_sweep_inactive_scan_x5" ||
         summary.kind === "baseline_fixed_inactive_scan_x5"

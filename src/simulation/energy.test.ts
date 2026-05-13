@@ -1,21 +1,25 @@
 import {
   defaultSimulationConfig,
   juxtaMainCMode0FixedPolicy,
-  JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS,
+  JUXTA5_8_MEASURED_PROD_ROUTINE_MEAN_MICRO_AMPS,
   milliampHoursFromMeanMicroAmps
 } from "./config";
-import { computeEnergyLog, meanEnergyLog, MICROCOULOMBS_PER_MILLIAMP_HOUR } from "./energy";
+import {
+  benchCalibratedBleIncrementsMicroAmps,
+  computeEnergyLog,
+  meanEnergyLog,
+  MICROCOULOMBS_PER_MILLIAMP_HOUR
+} from "./energy";
 import { runSimulation } from "./engine";
 import type { BleBurstEvent, EnergyConfig } from "./types";
 import { createInitialSimulation } from "./world";
 
-/** Energy tuned to reproduce ~233 µA long-run Juxta social-mode calibration in integration tests below. */
-function energyForJuxtaSocialDatasheetCheck(base: EnergyConfig): EnergyConfig {
+/** Component-model energy for tests that assert on RX listen windows and µC per packet. */
+function componentEnergy(overrides: Partial<EnergyConfig> = {}): EnergyConfig {
   return {
-    ...base,
-    baselineCurrentMicroAmps: 78,
-    componentBleActivityScale: 1.134,
-    measuredSocial5s20sTotalMicroAmps: 233.09
+    ...defaultSimulationConfig.energy,
+    energyModel: "component",
+    ...overrides
   };
 }
 
@@ -25,9 +29,10 @@ describe("energy model", () => {
     expect((13 * 1000) / MICROCOULOMBS_PER_MILLIAMP_HOUR).toBeCloseTo((13 * 1000) / 3_600_000, 12);
   });
 
-  it("with no bursts, only baseline contributes", () => {
+  it("with no bursts, only baseline contributes (bench_duration uses shelf)", () => {
     const energy = computeEnergyLog(120, 60, [], defaultSimulationConfig.energy);
-    const expectedSteady = (defaultSimulationConfig.energy.baselineCurrentMicroAmps * 60) / 3_600_000;
+    const shelf = defaultSimulationConfig.energy.benchShelfCurrentMicroAmps;
+    const expectedSteady = (shelf * 60) / 3_600_000;
     expect(energy.steadyMah).toBeCloseTo(expectedSteady, 6);
     expect(energy.scanMah).toBe(0);
     expect(energy.advertisingMah).toBe(0);
@@ -40,46 +45,68 @@ describe("energy model", () => {
     const burstsB: BleBurstEvent[] = [
       { kind: "scan", startTime: 0, endTime: 3, animalId: "animal-2", policyId: "p" }
     ];
-    const config = {
-      ...defaultSimulationConfig.energy,
+    const cfg = componentEnergy({
       baselineCurrentMicroAmps: 0,
       advertisingEventIntervalSeconds: 10,
       componentBleActivityScale: 1
-    };
-    const a = computeEnergyLog(60, 60, burstsA, config, 0);
-    const b = computeEnergyLog(60, 60, burstsB, config, 0);
+    });
+    const a = computeEnergyLog(60, 60, burstsA, cfg, 0);
+    const b = computeEnergyLog(60, 60, burstsB, cfg, 0);
     const m = meanEnergyLog(60, [a, b]);
     expect(m.totalMah).toBeCloseTo((a.totalMah + b.totalMah) / 2, 8);
     expect(m.cumulativeMah).toBeCloseTo((a.cumulativeMah + b.cumulativeMah) / 2, 8);
   });
 
-  it("uses scan listen duty and advertising event charge instead of burst wall time", () => {
+  it("component model uses scan listen duty and advertising event charge instead of burst wall time", () => {
     const bursts: BleBurstEvent[] = [
       { kind: "scan", startTime: 0, endTime: 1.5, animalId: "animal-1", policyId: "fixed-rate" },
       { kind: "advertise", startTime: 10, endTime: 12, animalId: "animal-1", policyId: "fixed-rate" }
     ];
-    const config = {
-      ...defaultSimulationConfig.energy,
+    const cfg = componentEnergy({
       baselineCurrentMicroAmps: 0,
       advertisingEventIntervalSeconds: 10,
       componentBleActivityScale: 1
-    };
+    });
 
-    const energy = computeEnergyLog(60, 60, bursts, config);
+    const energy = computeEnergyLog(60, 60, bursts, cfg);
 
-    expect(energy.scanMah).toBeCloseTo((0.375 * config.rxCurrentMa1MPhy) / 3600, 8);
+    expect(energy.scanMah).toBeCloseTo((0.375 * cfg.rxCurrentMa1MPhy) / 3600, 8);
     expect(energy.advertisingMah).toBeCloseTo(
-      config.advEventChargeMicroCoulombs / MICROCOULOMBS_PER_MILLIAMP_HOUR,
+      cfg.advEventChargeMicroCoulombs / MICROCOULOMBS_PER_MILLIAMP_HOUR,
       12
     );
   });
 
-  it("datasheet mean current converts to mAh (233.09 µA × 24 h ≈ 5.59 mAh per device)", () => {
-    const mah = milliampHoursFromMeanMicroAmps(JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS, 24);
-    expect(mah).toBeCloseTo(5.594_16, 2);
+  it("bench_duration scales burst increments so reference duties hit production mean", () => {
+    const inc = benchCalibratedBleIncrementsMicroAmps(defaultSimulationConfig.energy);
+    const d = defaultSimulationConfig.energy;
+    const meanUa =
+      inc.shelfUa +
+      inc.advActiveUa * d.benchProductionAdvDuty +
+      inc.scanActiveUa * d.benchProductionScanDuty;
+    expect(meanUa).toBeCloseTo(d.measuredSocial5s20sTotalMicroAmps, 6);
   });
 
-  it("24h Juxta Social Mode matches ~233 µA average per collar (±2%)", () => {
+  it("bench_duration uses advertise and scan burst wall seconds", () => {
+    const bursts: BleBurstEvent[] = [
+      { kind: "advertise", startTime: 0, endTime: 0.5, animalId: "a", policyId: "p" },
+      { kind: "scan", startTime: 1, endTime: 2.5, animalId: "a", policyId: "p" }
+    ];
+    const cfg = { ...defaultSimulationConfig.energy, benchWallTimeCalibrationScale: 1 };
+    const { advActiveUa, scanActiveUa, shelfUa } = benchCalibratedBleIncrementsMicroAmps(cfg);
+    const epoch = 10;
+    const row = computeEnergyLog(epoch, epoch, bursts, cfg, 0);
+    expect(row.steadyMah).toBeCloseTo((shelfUa * epoch) / 3_600_000, 8);
+    expect(row.advertisingMah).toBeCloseTo((advActiveUa * 0.5) / 3_600_000, 8);
+    expect(row.scanMah).toBeCloseTo((scanActiveUa * 1.5) / 3_600_000, 8);
+  });
+
+  it("Juxta5-8 bench mean current converts to mAh (467.891 µA × 24 h ≈ 11.23 mAh per device)", () => {
+    const mah = milliampHoursFromMeanMicroAmps(JUXTA5_8_MEASURED_PROD_ROUTINE_MEAN_MICRO_AMPS, 24);
+    expect(mah).toBeCloseTo(11.229_384, 2);
+  });
+
+  it("24h default fixed policy matches Juxta5-8 bench mean per collar (±2%)", () => {
     const config = {
       ...defaultSimulationConfig,
       seed: "energy-day",
@@ -87,11 +114,11 @@ describe("energy model", () => {
       startTimeSeconds: 0,
       timeStepSeconds: 60,
       activePolicy: { ...juxtaMainCMode0FixedPolicy },
-      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
+      energy: defaultSimulationConfig.energy
     };
     const steps = (24 * 3600) / config.timeStepSeconds;
     const final = runSimulation(createInitialSimulation(config), steps);
-    const expectedMah = milliampHoursFromMeanMicroAmps(JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS, 24);
+    const expectedMah = milliampHoursFromMeanMicroAmps(JUXTA5_8_MEASURED_PROD_ROUTINE_MEAN_MICRO_AMPS, 24);
     expect(final.energy.cumulativeMah).toBeGreaterThanOrEqual(expectedMah * 0.98);
     expect(final.energy.cumulativeMah).toBeLessThanOrEqual(expectedMah * 1.02);
   });
@@ -103,7 +130,7 @@ describe("energy model", () => {
       startTimeSeconds: 0,
       timeStepSeconds: 60,
       activePolicy: { ...juxtaMainCMode0FixedPolicy },
-      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
+      energy: defaultSimulationConfig.energy
     };
     const steps = (24 * 3600) / base.timeStepSeconds;
     const twelveState = runSimulation(createInitialSimulation({ ...base, animalCount: 12 }), steps);
@@ -113,7 +140,7 @@ describe("energy model", () => {
       twelveState.animals.length;
     expect(twelve).toBeCloseTo(manualMean, 5);
     const one = runSimulation(createInitialSimulation({ ...base, animalCount: 1 }), steps).energy.cumulativeMah;
-    const expectedMah = milliampHoursFromMeanMicroAmps(JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS, 24);
+    const expectedMah = milliampHoursFromMeanMicroAmps(JUXTA5_8_MEASURED_PROD_ROUTINE_MEAN_MICRO_AMPS, 24);
     expect(one).toBeGreaterThanOrEqual(expectedMah * 0.98);
     expect(one).toBeLessThanOrEqual(expectedMah * 1.02);
     expect(Math.abs(twelve - one) / one).toBeLessThanOrEqual(0.08);
@@ -127,7 +154,7 @@ describe("energy model", () => {
       animalCount: 1,
       startTimeSeconds: 0,
       activePolicy: { ...juxtaMainCMode0FixedPolicy },
-      energy: energyForJuxtaSocialDatasheetCheck(defaultSimulationConfig.energy)
+      energy: defaultSimulationConfig.energy
     };
     const dts = [30, 60] as const;
     const projected: number[] = [];

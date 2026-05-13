@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AssumptionsPanel } from "./components/AssumptionsPanel";
 import { CanvasVisualizer } from "./components/CanvasVisualizer";
 import { ControlsPanel } from "./components/ControlsPanel";
@@ -28,6 +28,7 @@ import {
   buildAnimalStripEvents,
   buildFixedBleTimeSeries,
   buildTimeSeries,
+  fixedBleScanOffStepIndices,
   sortedAnimalIdsFromLogs,
   type AnimalStripEvent,
   type TimeSeriesPoint
@@ -106,6 +107,13 @@ export function App() {
   const timeline = build.timeline;
   const simulation = timeline[currentStep] ?? timeline[0];
   const totalSteps = Math.max(0, timeline.length - 1);
+
+  const fixedBleScanOffSteps = useMemo(() => {
+    if (builtConfig.activePolicy.type !== "fixed") {
+      return [];
+    }
+    return fixedBleScanOffStepIndices(build.fixedBleTimeSeries);
+  }, [builtConfig.activePolicy.type, build.fixedBleTimeSeries]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -449,6 +457,7 @@ export function App() {
           <TimelinePanel
             currentStep={currentStep}
             totalSteps={totalSteps}
+            scanOffStepIndices={fixedBleScanOffSteps}
             timeSeconds={simulation.time}
             startTimeSeconds={builtConfig.startTimeSeconds}
             timeStepSeconds={builtConfig.timeStepSeconds}

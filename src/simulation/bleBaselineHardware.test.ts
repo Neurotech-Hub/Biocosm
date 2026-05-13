@@ -12,21 +12,21 @@ describe("BLE baseline vs hardware energy separation", () => {
     cfg.energy.baselineCurrentMicroAmps = 999;
     applyHardwareProfileToEnergy(cfg);
     expect(JSON.stringify(cfg.activePolicy)).toBe(policySnap);
-    expect(cfg.energy.baselineCurrentMicroAmps).toBe(10);
+    expect(cfg.energy.baselineCurrentMicroAmps).toBe(8.685);
   });
 
   it("neutral adaptive timing uses general-discovery anchors from default config", () => {
     const neutral = mapAdaptiveTiming(0.5, defaultAdaptivePolicy.timingAnchors);
     expect(neutral.scanIntervalSeconds).toBeCloseTo(20);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(1.5);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
     expect(neutral.advIntervalSeconds).toBeCloseTo(5);
   });
 
-  it("low-intensity anchor keeps frequent advertising (60s scan / 5s adv)", () => {
+  it("low-intensity anchor backs off scan while advertising is less frequent than neutral (60s scan / 10s adv)", () => {
     const low = mapAdaptiveTiming(0, defaultAdaptivePolicy.timingAnchors);
     expect(low.scanIntervalSeconds).toBeCloseTo(60);
-    expect(low.scanWindowSeconds).toBeCloseTo(0.75);
-    expect(low.advIntervalSeconds).toBeCloseTo(5);
+    expect(low.scanWindowSeconds).toBeCloseTo(0.2);
+    expect(low.advIntervalSeconds).toBeCloseTo(10);
   });
   it("sweep includes baseline_fixed row for selected BLE preset id", () => {
     const trials = buildSweepTrials("fast", "42", {
@@ -41,7 +41,7 @@ describe("BLE baseline vs hardware energy separation", () => {
     const fixed = fixedPolicyFromPreset(blePolicyPresets["juxta-v56-social"]!);
     expect(fixed.scanIntervalSeconds).toBe(20);
     expect(fixed.scanWindowSeconds).toBe(1.5);
-    expect(fixed.advIntervalSeconds).toBe(5);
-    expect(fixed.advertisingBurstDurationSeconds).toBe(2);
+    expect(fixed.advIntervalSeconds).toBe(1);
+    expect(fixed.advertisingBurstDurationSeconds).toBe(0.5);
   });
 });

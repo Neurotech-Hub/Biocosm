@@ -26,9 +26,9 @@ export function sweepFixedSummariesToCandidates(
   for (const s of summaries) {
     if (
       s.kind === "fixed_sweep" ||
-      s.kind === "fixed_sweep_inactivity_double" ||
+      s.kind === "fixed_sweep_inactive_scan_x3" ||
       s.kind === "fixed_sweep_inactive_scan_x5" ||
-      s.kind === "baseline_fixed_inactivity_double" ||
+      s.kind === "baseline_fixed_inactive_scan_x3" ||
       s.kind === "baseline_fixed_inactive_scan_x5"
     ) {
       fixedSummaries.push(s);

@@ -35,9 +35,9 @@ export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: Metri
             <dd>Firmware-style scan windows scheduled across the whole run. Negative windows are scans that found no peer.</dd>
             <dt>Energy and battery</dt>
             <dd>
-              Cohort mean across simulated animals: each timestep averages per-collar energy logs. Capture/mAh uses
-              that mean cumulative drain. Device lifetime assumes constant mean draw over 24 h and full usable pack
-              capacity per device.
+              Cohort mean across simulated animals: each timestep averages per-collar energy logs. Bench-calibrated mode
+              uses burst wall times and README-derived currents (fixed +8 dBm hardware assumption). Device lifetime
+              assumes constant mean draw over 24 h and full usable pack capacity per device.
             </dd>
           </dl>
         </InfoPopover>
@@ -88,9 +88,9 @@ export function MetricsPanel({ metrics, animalCount, batteryCapacityMah }: Metri
       {metrics.energyModelWarning ? <p className="helper-text">{metrics.energyModelWarning}</p> : null}
       <p className="helper-text metrics-panel-footnote">
         BLE energy and battery numbers are <strong>cohort means</strong> (per timestep, average across all simulated
-        animals): use them for population-average drain and voltage; match per-device datasheet figures to a single
-        animal’s trajectory in logs if needed. Raw detection density and interval capture rate are separate measures,
-        with capture bounded by opportunity epochs and raw density counting detection events.
+        animals). Mean current reflects the bench-calibrated duration model when enabled; device lifetime uses that mean
+        with full pack capacity. Raw detection density and interval capture rate are separate measures, with capture
+        bounded by opportunity epochs and raw density counting detection events.
       </p>
     </section>
   );

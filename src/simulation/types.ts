@@ -161,14 +161,15 @@ export type BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: number;
 };
 
-export type EnergyModel = "component";
+/** `component`: RX mA × listen-window seconds + adv µC × packet count. `bench_duration`: wall-time × bench-calibrated µA. */
+export type EnergyModel = "component" | "bench_duration";
 
 export type EnergyConfig = {
   batteryCapacityMah: number;
   startingVoltage: number;
   /** Non-BLE platform draw: sleep MCU, RTC, sensors idle, logging (µA). */
   baselineCurrentMicroAmps: number;
-  /** Assumed TX power for labeling / RSSI priors; path loss is separate. */
+  /** Fixed +8 dBm hardware assumption for RSSI priors; not an energy-model knob in bench_duration. */
   txPowerDbm: number;
   /** Nordic-style RX @ 1M PHY — scan energy uses listen-window seconds × this (mA). */
   rxCurrentMa1MPhy: number;
@@ -178,8 +179,9 @@ export type EnergyConfig = {
   advEventChargeMicroCoulombs: number;
   energyModel: EnergyModel;
   /**
-   * Reference bench total average current for 5 s advertise / 20 s scan style duty, µA.
-   * Used for >3× component-model warnings vs this reference.
+   * Juxta5-8-nRF measured mean current at battery terminals (µA) for the production routine matching default discovery:
+   * 1 s advertise interval / 20 s scan interval (see README “Measured current draw”). Legacy field name.
+   * Bench model: calibration target. Component model: used for >3× warnings when the active fixed policy matches that schedule.
    */
   measuredSocial5s20sTotalMicroAmps: number;
   /**
@@ -187,6 +189,27 @@ export type EnergyConfig = {
    * match datasheet long-run averages when burst-level counts undercount duty.
    */
   componentBleActivityScale?: number;
+  /** Bench table: shelf / System OFF (µA). Steady baseline for `bench_duration`. */
+  benchShelfCurrentMicroAmps: number;
+  /** Bench table: production non-connectable advertise burst (µA). */
+  benchAdvertiseBurstCurrentMicroAmps: number;
+  /** Bench table: production passive scan burst (µA). */
+  benchScanBurstCurrentMicroAmps: number;
+  /**
+   * Long-run advertising burst wall-time fraction used to calibrate active µA increments vs `measuredSocial5s20sTotalMicroAmps`
+   * (e.g. 0.5 s burst / 1 s adv interval = 0.5).
+   */
+  benchProductionAdvDuty: number;
+  /**
+   * Long-run scan burst wall-time fraction matching the sim schedule (e.g. 1.5 s window / 20 s interval), not necessarily
+   * firmware’s 3 s passive burst length.
+   */
+  benchProductionScanDuty: number;
+  /**
+   * Multiplies bench active µA (advertise/scan increments) after README duty calibration so long-run simulated wall time
+   * matches measured production mean (sim defers/jitter/epoch clipping vs ideal duties). Profile-only; not shown in UI.
+   */
+  benchWallTimeCalibrationScale?: number;
 };
 
 export type FixedPolicyConfig = {
@@ -201,18 +224,20 @@ export type FixedPolicyConfig = {
   /**
    * When true, after each animal's consecutive no-motion time reaches its **movement bout mean** (minutes, sampled
    * trait), **scan interval only** is multiplied by `inactiveScanIntervalMultiplier` until motion resumes.
+   * If the multiplier is `"inf"`, instead **scan window is forced to zero** whenever the last simulation epoch had no
+   * motion (`motionDetected` false for that step); advertising is unchanged.
    */
   doubleWhenInactive?: boolean;
-  /** Scan interval multiplier when inactive stretch applies (2–5). Ignored unless `doubleWhenInactive`. Defaults to 2. */
-  inactiveScanIntervalMultiplier?: 2 | 3 | 4 | 5;
+  /** Scan interval multiplier when inactive stretch applies, or `"inf"` for epoch no-motion scan-off. Ignored unless `doubleWhenInactive`. Defaults to 2. */
+  inactiveScanIntervalMultiplier?: 1.5 | 2 | 3 | 4 | 5 | "inf";
 };
 
-/** BLE sweep trial policy category (baseline vs grid vs adaptive; each fixed-rate combo has no / inactive×2 / inactive×5 rows). */
+/** BLE sweep trial policy category (baseline vs grid vs adaptive; each fixed-rate combo has inactive-scan stretch variants). */
 export type SweepPolicyKind =
   | "baseline_fixed"
   | "fixed_sweep"
-  | "baseline_fixed_inactivity_double"
-  | "fixed_sweep_inactivity_double"
+  | "baseline_fixed_inactive_scan_x3"
+  | "fixed_sweep_inactive_scan_x3"
   | "baseline_fixed_inactive_scan_x5"
   | "fixed_sweep_inactive_scan_x5"
   | "adaptive";

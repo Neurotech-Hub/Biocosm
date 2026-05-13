@@ -1,12 +1,19 @@
-import type { Animal, FirmwarePolicyConfig, FixedPolicyConfig, ScanWindowLog } from "../types";
+import type { Animal, AnimalObservation, FirmwarePolicyConfig, FixedPolicyConfig, ScanWindowLog } from "../types";
 
 export const DEFAULT_ADVERTISING_BURST_DURATION_SECONDS = 2;
+
+export function isInactiveScanMultiplierInf(
+  mult: FixedPolicyConfig["inactiveScanIntervalMultiplier"] | undefined
+): mult is "inf" {
+  return mult === "inf";
+}
 
 export function applyFixedRatePolicy(
   animal: Animal,
   policy: FixedPolicyConfig,
   timeSeconds: number,
-  dtSeconds: number
+  dtSeconds: number,
+  observation: AnimalObservation
 ): Animal {
   void timeSeconds;
   void dtSeconds;
@@ -14,8 +21,13 @@ export function applyFixedRatePolicy(
     policy.advertisingBurstDurationSeconds ?? DEFAULT_ADVERTISING_BURST_DURATION_SECONDS;
   const mult = policy.inactiveScanIntervalMultiplier ?? 2;
   const boutSeconds = Math.max(1, animal.traits.movementBoutMeanMinutes * 60);
+  const infInactiveScan =
+    policy.doubleWhenInactive === true && isInactiveScanMultiplierInf(policy.inactiveScanIntervalMultiplier) && !observation.motionDetected;
   const stretchInactiveScan =
-    policy.doubleWhenInactive === true && animal.collar.noMotionStreakSeconds >= boutSeconds;
+    policy.doubleWhenInactive === true &&
+    !isInactiveScanMultiplierInf(policy.inactiveScanIntervalMultiplier) &&
+    animal.collar.noMotionStreakSeconds >= boutSeconds;
+  const numericMult = typeof mult === "number" ? mult : 2;
 
   return {
     ...animal,
@@ -23,10 +35,8 @@ export function applyFixedRatePolicy(
       ...animal.collar,
       scanActive: false,
       advActive: false,
-      scanIntervalSeconds: stretchInactiveScan
-        ? policy.scanIntervalSeconds * mult
-        : policy.scanIntervalSeconds,
-      scanWindowSeconds: policy.scanWindowSeconds,
+      scanIntervalSeconds: stretchInactiveScan ? policy.scanIntervalSeconds * numericMult : policy.scanIntervalSeconds,
+      scanWindowSeconds: infInactiveScan ? 0 : policy.scanWindowSeconds,
       advIntervalSeconds: policy.advIntervalSeconds,
       advertisingBurstDurationSeconds
     }

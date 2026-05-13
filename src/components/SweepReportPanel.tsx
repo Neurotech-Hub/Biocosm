@@ -75,11 +75,11 @@ function algBadge(summary: SweepPolicySummary): { letter: string; title: string;
   if (summary.isComparisonBaseline || summary.kind === "baseline_fixed") {
     return { letter: "B", title: "Comparison baseline (fixed)", className: "sweep-alg sweep-alg-juxta" };
   }
-  if (summary.kind === "baseline_fixed_inactivity_double") {
+  if (summary.kind === "baseline_fixed_inactive_scan_x3") {
     return {
-      letter: "D",
-      title: "Baseline schedule with bout-delayed inactive scan ×2",
-      className: "sweep-alg sweep-alg-fixed-dd"
+      letter: "3",
+      title: "Baseline schedule with bout-delayed inactive scan ×3",
+      className: "sweep-alg sweep-alg-fixed-i3"
     };
   }
   if (summary.kind === "baseline_fixed_inactive_scan_x5") {
@@ -89,11 +89,11 @@ function algBadge(summary: SweepPolicySummary): { letter: string; title: string;
       className: "sweep-alg sweep-alg-fixed-i5"
     };
   }
-  if (summary.kind === "fixed_sweep_inactivity_double") {
+  if (summary.kind === "fixed_sweep_inactive_scan_x3") {
     return {
-      letter: "D",
-      title: "Fixed-rate sweep with bout-delayed inactive scan ×2",
-      className: "sweep-alg sweep-alg-fixed-dd"
+      letter: "3",
+      title: "Fixed-rate sweep with bout-delayed inactive scan ×3",
+      className: "sweep-alg sweep-alg-fixed-i3"
     };
   }
   if (summary.kind === "fixed_sweep_inactive_scan_x5") {
@@ -114,10 +114,10 @@ function scatterVariantFromSummary(summary: SweepPolicySummary): ScatterPoint["v
     return "adaptive";
   }
   if (
-    summary.kind === "baseline_fixed_inactivity_double" ||
-    summary.kind === "fixed_sweep_inactivity_double"
+    summary.kind === "baseline_fixed_inactive_scan_x3" ||
+    summary.kind === "fixed_sweep_inactive_scan_x3"
   ) {
-    return "fixed_inactive_x2";
+    return "fixed_inactive_x3";
   }
   if (
     summary.kind === "baseline_fixed_inactive_scan_x5" ||
@@ -133,7 +133,7 @@ type ScatterPoint = {
   y: number;
   id: string;
   tooltip: string;
-  variant: "adaptive" | "fixed_no_inactive" | "fixed_inactive_x2" | "fixed_inactive_x5";
+  variant: "adaptive" | "fixed_no_inactive" | "fixed_inactive_x3" | "fixed_inactive_x5";
   /** Non-dominated on mean capture vs mean mAh/day (same as summary CSV). */
   pareto: boolean;
 };
@@ -926,8 +926,8 @@ function SweepPlotLegendHtml() {
         Fixed (no inactive multiplier)
       </span>
       <span>
-        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive-x2" aria-hidden />
-        Fixed inactive scan ×2
+        <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive-x3" aria-hidden />
+        Fixed inactive scan ×3
       </span>
       <span>
         <i className="sweep-legend-icon sweep-legend-icon--fixed-inactive-x5" aria-hidden />
@@ -951,8 +951,8 @@ function scatterFillForVariant(variant: ScatterPoint["variant"]): string {
       return "#06b6d4";
     case "fixed_no_inactive":
       return "#8b5cf6";
-    case "fixed_inactive_x2":
-      return "#eab308";
+    case "fixed_inactive_x3":
+      return "#14b8a6";
     case "fixed_inactive_x5":
       return "#f97316";
     default:

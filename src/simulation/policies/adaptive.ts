@@ -26,7 +26,7 @@ export function applyFirmwarePolicy(
   dtSeconds: number
 ): Animal {
   if (policy.type === "fixed") {
-    return applyFixedRatePolicy(animal, policy, timeSeconds, dtSeconds);
+    return applyFixedRatePolicy(animal, policy, timeSeconds, dtSeconds, observation);
   }
 
   return applyMotionPeerAdaptivePolicy(
@@ -133,7 +133,7 @@ export function constrainAdaptiveTiming<T extends AdaptiveBleTiming & { advertis
   timing: T
 ): T {
   const scanIntervalSeconds = Math.max(1, timing.scanIntervalSeconds);
-  const advIntervalSeconds = Math.max(0.25, timing.advIntervalSeconds);
+  const advIntervalSeconds = Math.max(0.2, timing.advIntervalSeconds);
   const scanWindowSeconds = Math.min(scanIntervalSeconds, Math.max(0.05, timing.scanWindowSeconds));
   const advertisingBurstDurationSeconds = Math.max(0.1, timing.advertisingBurstDurationSeconds);
 

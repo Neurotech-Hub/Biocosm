@@ -12,7 +12,7 @@ export type OptimizerScatterObserved = {
   y: number;
   id: string;
   tooltip: string;
-  variant: "adaptive" | "fixed_no_inactive" | "fixed_inactive_x2" | "fixed_inactive_x5";
+  variant: "adaptive" | "fixed_no_inactive" | "fixed_inactive_x3" | "fixed_inactive_x5";
   highlight: boolean;
   pareto: boolean;
 };
@@ -70,8 +70,8 @@ function observedScatterFill(variant: OptimizerScatterObserved["variant"]): stri
       return "#06b6d4";
     case "fixed_no_inactive":
       return "#8b5cf6";
-    case "fixed_inactive_x2":
-      return "#eab308";
+    case "fixed_inactive_x3":
+      return "#14b8a6";
     case "fixed_inactive_x5":
       return "#f97316";
     default:

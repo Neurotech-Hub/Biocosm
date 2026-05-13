@@ -79,7 +79,7 @@ describe("workspaceFile", () => {
       return;
     }
     expect(parsed.data.config.hardwareEnergyProfileId).toBe(DEFAULT_HARDWARE_ENERGY_PROFILE_ID);
-    expect(parsed.data.config.energy.energyModel).toBe("component");
+    expect(parsed.data.config.energy.energyModel).toBe("bench_duration");
   });
 
   it("parses minimal v2 when sweep section uses defaults for missing fields", () => {

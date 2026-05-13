@@ -410,9 +410,23 @@ export function TimeSeriesPanel({
               className="time-series-chart ble-policy-chart"
               viewBox={`0 0 ${chartWidth} ${bleChartHeight}`}
               role="img"
-              aria-label="Cohort mean applied scan, advertise, and window intervals and envelope duty for fixed-rate BLE over time"
+              aria-label={
+                fixedBleSummary.hasScanOffBands
+                  ? "Cohort mean fixed-rate BLE intervals and envelope duty over time; shaded regions indicate no passive scan window (mean 0 seconds)"
+                  : "Cohort mean applied scan, advertise, and window intervals and envelope duty for fixed-rate BLE over time"
+              }
             >
               <rect x="0" y="0" width={chartWidth} height={bleChartHeight} rx="12" className="chart-background" />
+              {fixedBleSummary.scanOffBands.map((band, index) => (
+                <rect
+                  key={`ble-scan-off-${index}`}
+                  x={band.x1}
+                  y={chartPadding.top}
+                  width={Math.max(band.x2 - band.x1, 0.5)}
+                  height={fixedBleSummary.plotHeight}
+                  className="ble-fixed-scan-off-band"
+                />
+              ))}
               <line
                 x1={chartPadding.left}
                 y1={chartPadding.top + fixedBleSummary.plotHeight}
@@ -518,6 +532,12 @@ export function TimeSeriesPanel({
               <span>
                 <i className="legend-swatch ble-legend-fixed-duty" /> mean envelope duty (0–1, right)
               </span>
+              {fixedBleSummary.hasScanOffBands ? (
+                <span>
+                  <i className="legend-swatch ble-legend-fixed-scan-off" /> shaded band &amp; scrub ticks: no passive
+                  scan (mean window 0 s — Inf inactive when nobody moved last epoch)
+                </span>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -798,6 +818,8 @@ function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSer
   if (series.length === 0) {
     return {
       hasPolicyRow: false,
+      hasScanOffBands: false,
+      scanOffBands: [] as { x1: number; x2: number }[],
       maxTime,
       plotWidth,
       plotHeight,
@@ -840,8 +862,12 @@ function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSer
     .join(" ");
 
   const cursorX = chartPadding.left + ((points[currentStep]?.time ?? 0) / maxTime) * plotWidth;
+  const scanOffBands = buildFixedBleScanOffBands(series, maxTime, plotWidth, chartPadding.left);
+  const hasScanOffBands = scanOffBands.length > 0;
   return {
     hasPolicyRow,
+    hasScanOffBands,
+    scanOffBands,
     maxTime,
     plotWidth,
     plotHeight,
@@ -855,6 +881,49 @@ function createFixedBleChartSummary(series: FixedBleTimePoint[], points: TimeSer
     secondTicks: createTicks(0, maxSeconds, 5),
     dutyTicks: createTicks(0, maxDuty, 5)
   };
+}
+
+function buildFixedBleScanOffBands(
+  series: FixedBleTimePoint[],
+  maxTime: number,
+  plotWidth: number,
+  chartLeft: number
+): { x1: number; x2: number }[] {
+  if (series.length === 0) {
+    return [];
+  }
+  const t2x = (t: number) => chartLeft + (t / maxTime) * plotWidth;
+  const leftBound = (i: number) =>
+    i === 0 ? t2x(0) : t2x((series[i]!.time + series[i - 1]!.time) / 2);
+  const rightBound = (i: number) =>
+    i === series.length - 1 ? t2x(maxTime) : t2x((series[i]!.time + series[i + 1]!.time) / 2);
+
+  const bands: { x1: number; x2: number }[] = [];
+  let runStart: number | null = null;
+  let runEndX: number | null = null;
+
+  for (let i = 0; i < series.length; i++) {
+    if (!series[i]!.noScanWindow) {
+      if (runStart !== null && runEndX !== null) {
+        bands.push({ x1: runStart, x2: runEndX });
+        runStart = null;
+        runEndX = null;
+      }
+      continue;
+    }
+    const xL = leftBound(i);
+    const xR = rightBound(i);
+    if (runStart === null) {
+      runStart = xL;
+      runEndX = xR;
+    } else {
+      runEndX = xR;
+    }
+  }
+  if (runStart !== null && runEndX !== null) {
+    bands.push({ x1: runStart, x2: runEndX });
+  }
+  return bands;
 }
 
 /** Trailing moving average of `movementFraction` over simulation time `windowSeconds`. */

@@ -67,7 +67,7 @@ describe("BLE firmware alignment", () => {
     expect(Math.abs(packetsChunked - packetsOnce) / Math.max(packetsOnce, 1)).toBeLessThanOrEqual(0.02);
   });
 
-  it("schedules roughly 3 scans and ~9 advertises per wall minute for JUXTA mode 0 (one animal; serial radio + gaps)", () => {
+  it("schedules roughly 3 scans and frequent advertises per wall minute for Juxta5-8-style fixed policy (one animal; serial radio + gaps)", () => {
     const state = createInitialSimulation({
       ...defaultSimulationConfig,
       pathNodeCount: 18,
@@ -81,8 +81,8 @@ describe("BLE firmware alignment", () => {
     const adverts = bursts.filter((burst) => burst.kind === "advertise").length;
     expect(scans).toBeGreaterThanOrEqual(2);
     expect(scans).toBeLessThanOrEqual(4);
-    expect(adverts).toBeGreaterThanOrEqual(8);
-    expect(adverts).toBeLessThanOrEqual(14);
+    expect(adverts).toBeGreaterThanOrEqual(40);
+    expect(adverts).toBeLessThanOrEqual(55);
   });
 
   it("minute write safe zone changes scheduled burst times", () => {
@@ -181,14 +181,18 @@ describe("BLE firmware alignment", () => {
       { kind: "advertise", startTime: 0, endTime: 2, animalId: "a", policyId: "p" },
       { kind: "scan", startTime: 3, endTime: 4.5, animalId: "a", policyId: "p" }
     ];
-    const energy = computeEnergyLog(60, 60, bursts, defaultSimulationConfig.energy);
+    const componentEnergy = {
+      ...defaultSimulationConfig.energy,
+      energyModel: "component" as const
+    };
+    const energy = computeEnergyLog(60, 60, bursts, componentEnergy);
     const packets = countAdvertisingPacketsInBursts(
       bursts,
-      defaultSimulationConfig.energy.advertisingEventIntervalSeconds
+      componentEnergy.advertisingEventIntervalSeconds
     );
-    const scale = defaultSimulationConfig.energy.componentBleActivityScale ?? 1;
+    const scale = componentEnergy.componentBleActivityScale ?? 1;
     const expectedAdvMah =
-      ((packets * defaultSimulationConfig.energy.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) *
+      ((packets * componentEnergy.advEventChargeMicroCoulombs) / MICROCOULOMBS_PER_MILLIAMP_HOUR) *
       scale;
     expect(energy.advertisingMah).toBeCloseTo(expectedAdvMah, 6);
     expect(energy.scanMah).toBeGreaterThan(0);

@@ -78,7 +78,7 @@ function mergeSimulationConfig(partial: unknown): SimulationConfig {
     merged.radio = { ...base.radio, ...(p.radio as SimulationConfig["radio"]) };
   }
   if (isPlainObject(p.energy)) {
-    merged.energy = { ...base.energy, ...(p.energy as SimulationConfig["energy"]), energyModel: "component" };
+    merged.energy = { ...base.energy, ...(p.energy as SimulationConfig["energy"]) };
   }
   if (isPlainObject(p.bleScheduling)) {
     merged.bleScheduling = { ...base.bleScheduling, ...(p.bleScheduling as SimulationConfig["bleScheduling"]) };
@@ -95,7 +95,6 @@ function mergeSimulationConfig(partial: unknown): SimulationConfig {
   merged.blePolicyPresetId = normalizeBlePolicyPresetId(merged.blePolicyPresetId);
   const hwNorm = normalizeHardwareEnergyProfileId(String(merged.hardwareEnergyProfileId));
   merged.hardwareEnergyProfileId = hardwareEnergyProfiles[hwNorm] ? hwNorm : DEFAULT_HARDWARE_ENERGY_PROFILE_ID;
-  merged.energy.energyModel = "component";
   return merged;
 }
 

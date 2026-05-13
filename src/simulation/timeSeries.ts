@@ -119,6 +119,8 @@ export type FixedBleTimePoint = {
   advIntervalSeconds: number;
   scanWindowSeconds: number;
   envelopeDuty: number;
+  /** Cohort-mean passive listen window is zero this step (no scan scheduled; e.g. Inf inactive with no motion last epoch). */
+  noScanWindow: boolean;
 };
 
 export function buildAdaptiveBleTimeSeries(timeline: SimulationState[]): AdaptiveBleTimePoint[] {
@@ -142,6 +144,17 @@ export function buildAdaptiveBleTimeSeries(timeline: SimulationState[]): Adaptiv
   });
 }
 
+/** Step indices where cohort-mean passive listen window is zero (aligned with `timeline` / `buildFixedBleTimeSeries` order). */
+export function fixedBleScanOffStepIndices(series: FixedBleTimePoint[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < series.length; i++) {
+    if (series[i]!.noScanWindow) {
+      out.push(i);
+    }
+  }
+  return out;
+}
+
 export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTimePoint[] {
   if (timeline.length === 0) {
     return [];
@@ -153,7 +166,8 @@ export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTi
       scanIntervalSeconds: 0,
       advIntervalSeconds: 0,
       scanWindowSeconds: 0,
-      envelopeDuty: 0
+      envelopeDuty: 0,
+      noScanWindow: false
     }));
   }
   const advBurst = policy.advertisingBurstDurationSeconds ?? 2;
@@ -179,7 +193,8 @@ export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTi
       scanIntervalSeconds,
       advIntervalSeconds,
       scanWindowSeconds,
-      envelopeDuty
+      envelopeDuty,
+      noScanWindow: scanWindowSeconds < 1e-9
     };
   });
 }

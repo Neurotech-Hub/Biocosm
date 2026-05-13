@@ -109,15 +109,13 @@ export function SweepControlsPanel({
         <h2>Sweep settings</h2>
         <InfoPopover label="Sweep details and grid size" title="About this sweep">
           <p>
-            Choose how many policies run <strong>per world seed</strong> from the dropdown: <strong>smoke test</strong> is a
-            tiny subset for fast local checks; <strong>interactive</strong> ({quickPoliciesPerSeed} with this baseline) is the
-            default for iteration; <strong>full</strong> matches a production build with <code>VITE_SWEEP_FULL_GRID=true</code>{" "}
-            (wider Cartesian axes).
+            Smoke test, interactive, and full all use the <strong>same compact grid</strong> today ({quickPoliciesPerSeed}{" "}
+            policies per seed with this baseline, including the comparison baseline schedule plus inactive scan ×3 and ×5
+            variants). The dropdown is kept for workflow labels; denser grids may return later.
           </p>
           <p>
-            Each option is <strong>fixed-rate schedules + adaptive policies</strong> per seed, centered on your comparison BLE
-            baseline from the Simulator tab (currently <strong>{minimalPoliciesPerSeed}</strong> / <strong>{quickPoliciesPerSeed}</strong>{" "}
-            / <strong>{fullPoliciesPerSeed}</strong> policies per seed for smoke test / interactive / full with this baseline).
+            Each run is <strong>fixed-rate schedules + adaptive policies</strong> per seed, anchored to your comparison BLE
+            baseline from the Simulator tab.
           </p>
           <p>Uses your last built simulation configuration.</p>
           <p>
@@ -125,8 +123,8 @@ export function SweepControlsPanel({
             effort.
           </p>
           <p>
-            Interactive and smoke-test grids use <code>baselineDrive</code> values below the 0.5 neutral sampling anchor on
-            purpose (energy-saving idle bias; motion/peer terms can ramp duty when active).
+            Adaptive grid uses <code>baselineDrive</code> 0.1 and 0.3 (bracketing the 0.5 neutral sampling anchor), with motion
+            and peer weights at 0.2 / 0.5 and τ_peer 200 s / 600 s.
           </p>
           <p>
             Aggregate mode draws world seeds from a fixed pool ({SWEEP_REPORT_SEED_POOL.join(", ")}). Choose how many seeds to
@@ -179,7 +177,10 @@ export function SweepControlsPanel({
           </select>
         </label>
         {buildPrefersFull ? (
-          <p className="helper-text">This build defaults to the larger grid via <code>VITE_SWEEP_FULL_GRID</code>.</p>
+          <p className="helper-text">
+            This build sets the default variant to <strong>full</strong> via <code>VITE_SWEEP_FULL_GRID</code> (same policy
+            count as interactive for now).
+          </p>
         ) : null}
       </div>
 
@@ -247,11 +248,13 @@ export function SweepControlsPanel({
             <dt>Policies per seed</dt>
             <dd>
               {execSummary.policiesPerSeed} (
-              {execSummary.variant === "minimal"
-                ? "smoke-test grid"
-                : execSummary.variant === "quick"
-                  ? "interactive grid"
-                  : "full exploratory grid"}{" "}
+              {minimalPoliciesPerSeed === quickPoliciesPerSeed && quickPoliciesPerSeed === fullPoliciesPerSeed
+                ? "compact grid (all menu options use the same counts for now)"
+                : execSummary.variant === "minimal"
+                  ? "smoke-test grid"
+                  : execSummary.variant === "quick"
+                    ? "interactive grid"
+                    : "full exploratory grid"}{" "}
               for this baseline)
             </dd>
           </div>

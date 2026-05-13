@@ -35,11 +35,11 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     id: "general-discovery",
     label: "General discovery",
     description:
-      "Recommended starting point for proximity logging: frequent advertising with periodic short scan bursts.",
+      "Recommended starting point for proximity logging: 1 s advertise cadence, 20 s scan interval, 1.5 s listen window, 500 ms non-connectable adv bursts (Juxta5-8-nRF prod bench; scan window is shorter than firmware 3 s passive burst).",
     scanIntervalSeconds: 20,
     scanWindowSeconds: 1.5,
-    advIntervalSeconds: 5,
-    advertisingBurstDurationSeconds: 2
+    advIntervalSeconds: 1,
+    advertisingBurstDurationSeconds: 0.5
   },
   "general-low-power": {
     id: "general-low-power",
@@ -74,11 +74,11 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     id: "juxta-v56-social",
     label: "Juxta v5/6 social mode",
     description:
-      "Juxta-specific name for the original social-mode schedule. Numerically equivalent to General discovery unless changed later.",
+      "Juxta-specific label; numerically aligned with General discovery (1 s adv / 20 s scan, 500 ms adv burst).",
     scanIntervalSeconds: 20,
     scanWindowSeconds: 1.5,
-    advIntervalSeconds: 5,
-    advertisingBurstDurationSeconds: 2
+    advIntervalSeconds: 1,
+    advertisingBurstDurationSeconds: 0.5
   }
 };
 
@@ -138,29 +138,31 @@ export function referenceDiscoveryBlePreset(): BlePolicyPresetDef {
 
 /**
  * Spec §11 — adaptive anchors for general-discovery (override generic formula).
- * Low intensity keeps frequent advertising (5 s) while backing off scan interval.
+ * Anchors target a deployable “efficient discovery” band (short windows, 1–2.5 s adv spacing; sweep uses 2 s bursts).
  * Other presets use formula from baseline scan/adv/window.
  */
 export function buildAdaptiveAnchorsFromBaseline(preset: BlePolicyPresetDef): AdaptiveBleTimingAnchors {
   const burst = preset.advertisingBurstDurationSeconds;
   if (preset.id === "general-discovery" || preset.id === "juxta-v56-social") {
+    /** Deployable “efficient discovery” region for sweeps: shorter scan windows, moderate intervals, 2 s adv bursts. */
+    void burst;
     return {
       lowIntensity: {
         scanIntervalSeconds: 60,
-        scanWindowSeconds: 0.75,
-        advIntervalSeconds: 5
+        scanWindowSeconds: 0.2,
+        advIntervalSeconds: 10
       },
       neutral: {
         scanIntervalSeconds: 20,
-        scanWindowSeconds: 1.5,
+        scanWindowSeconds: 0.5,
         advIntervalSeconds: 5
       },
       highIntensity: {
-        scanIntervalSeconds: 5,
-        scanWindowSeconds: 3.0,
-        advIntervalSeconds: 1.5
+        scanIntervalSeconds: 10,
+        scanWindowSeconds: 1,
+        advIntervalSeconds: 0.2
       },
-      advertisingBurstDurationSeconds: burst
+      advertisingBurstDurationSeconds: 2
     };
   }
 

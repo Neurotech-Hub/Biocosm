@@ -5,6 +5,8 @@ import { formatClockHHMM } from "../timeFormat";
 type TimelinePanelProps = {
   currentStep: number;
   totalSteps: number;
+  /** Timeline step indices where fixed-policy cohort mean passive scan window is 0 (optional; aligns with chart shading). */
+  scanOffStepIndices?: readonly number[];
   timeSeconds: number;
   startTimeSeconds: number;
   timeStepSeconds: number;
@@ -19,6 +21,7 @@ type TimelinePanelProps = {
 export function TimelinePanel({
   currentStep,
   totalSteps,
+  scanOffStepIndices,
   timeSeconds,
   startTimeSeconds,
   timeStepSeconds,
@@ -85,14 +88,30 @@ export function TimelinePanel({
         </div>
         <label className="timeline-scrub-label">
           Scrub simulation time: step {currentStep} / {totalSteps}
-          <input
-            type="range"
-            min="0"
-            max={totalSteps}
-            step="1"
-            value={currentStep}
-            onChange={(event) => onStepChange(Number(event.target.value))}
-          />
+          <div className="timeline-scrub-track-wrap">
+            {scanOffStepIndices && scanOffStepIndices.length > 0 ? (
+              <div
+                className="timeline-scan-off-marker-layer"
+                title="Orange ticks: timesteps with no passive scan window (cohort mean 0 s, e.g. Inf inactive when nobody moved in the last epoch)."
+              >
+                {scanOffStepIndices.map((step) => (
+                  <span
+                    key={step}
+                    className="timeline-scan-off-tick"
+                    style={{ left: `${totalSteps > 0 ? (step / totalSteps) * 100 : 0}%` }}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <input
+              type="range"
+              min="0"
+              max={totalSteps}
+              step="1"
+              value={currentStep}
+              onChange={(event) => onStepChange(Number(event.target.value))}
+            />
+          </div>
         </label>
       </div>
       <p className="helper-text timeline-playback-hint">

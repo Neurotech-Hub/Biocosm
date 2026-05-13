@@ -14,6 +14,29 @@ function microAmpSecondsToMilliampHours(microAmps: number, seconds: number): num
   return (microAmps * seconds) / 3_600_000;
 }
 
+/**
+ * Calibrated active µA increments above shelf for advertise and scan burst wall seconds, so the reference
+ * long-run duties hit `measuredSocial5s20sTotalMicroAmps` (production routine mean).
+ */
+export function benchCalibratedBleIncrementsMicroAmps(config: EnergyConfig): {
+  shelfUa: number;
+  advActiveUa: number;
+  scanActiveUa: number;
+} {
+  const shelf = config.benchShelfCurrentMicroAmps;
+  const rawAdv = Math.max(0, config.benchAdvertiseBurstCurrentMicroAmps - shelf);
+  const rawScan = Math.max(0, config.benchScanBurstCurrentMicroAmps - shelf);
+  const rawMean =
+    rawAdv * config.benchProductionAdvDuty + rawScan * config.benchProductionScanDuty;
+  const target = Math.max(0, config.measuredSocial5s20sTotalMicroAmps - shelf);
+  const scale = rawMean > 1e-12 ? target / rawMean : 1;
+  return {
+    shelfUa: shelf,
+    advActiveUa: rawAdv * scale,
+    scanActiveUa: rawScan * scale
+  };
+}
+
 export function computeEnergyLog(
   time: number,
   epochSeconds: number,
@@ -21,9 +44,37 @@ export function computeEnergyLog(
   config: EnergyConfig,
   previousCumulativeMah = 0
 ): EnergyLog {
-  const interval = config.advertisingEventIntervalSeconds;
   const steadyMah = microAmpSecondsToMilliampHours(config.baselineCurrentMicroAmps, epochSeconds);
 
+  if (config.energyModel === "bench_duration") {
+    const { shelfUa, advActiveUa, scanActiveUa } = benchCalibratedBleIncrementsMicroAmps(config);
+    const wallCal = config.benchWallTimeCalibrationScale ?? 1;
+    const advUa = advActiveUa * wallCal;
+    const scanUa = scanActiveUa * wallCal;
+    const advWall = totalBleBurstWallSeconds(bursts, "advertise");
+    const scanWall = totalBleBurstWallSeconds(bursts, "scan");
+    const steadyBenchMah = microAmpSecondsToMilliampHours(shelfUa, epochSeconds);
+    const advertisingMah = microAmpSecondsToMilliampHours(advUa, advWall);
+    const scanMah = microAmpSecondsToMilliampHours(scanUa, scanWall);
+    const totalMah = steadyBenchMah + scanMah + advertisingMah;
+    const cumulativeMah = previousCumulativeMah + totalMah;
+    const remainingMah = Math.max(0, config.batteryCapacityMah - cumulativeMah);
+    const remainingPercent = config.batteryCapacityMah > 0 ? remainingMah / config.batteryCapacityMah : 0;
+
+    return {
+      time,
+      steadyMah: steadyBenchMah,
+      scanMah,
+      advertisingMah,
+      totalMah,
+      cumulativeMah,
+      remainingMah,
+      remainingPercent,
+      estimatedVoltage: estimateLipoVoltage(remainingPercent, config.startingVoltage)
+    };
+  }
+
+  const interval = config.advertisingEventIntervalSeconds;
   const bleScale = config.componentBleActivityScale ?? 1;
   const listenSeconds = totalScanListenWindowSeconds(bursts);
   const scanMah = ((listenSeconds * config.rxCurrentMa1MPhy) / 3600) * bleScale;

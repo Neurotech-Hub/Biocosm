@@ -87,6 +87,43 @@ describe("time series helpers", () => {
     expect(series[0]!.scanIntervalSeconds).toBe(30);
     expect(series[1]!.scanIntervalSeconds).toBe(30);
     expect(series[0]!.envelopeDuty).toBeCloseTo(1 / 30 + 2 / 4);
+    expect(series[0]!.noScanWindow).toBe(false);
+    expect(series[1]!.noScanWindow).toBe(false);
+  });
+
+  it("buildFixedBleTimeSeries marks noScanWindow when cohort mean scan window is zero", () => {
+    const policy = {
+      type: "fixed" as const,
+      id: "f",
+      name: "f",
+      scanIntervalSeconds: 10,
+      scanWindowSeconds: 1,
+      advIntervalSeconds: 4,
+      advertisingBurstDurationSeconds: 2
+    };
+    const stubAnimal = (id: string, scan: number, adv: number, win: number): Animal =>
+      ({
+        id,
+        collar: {
+          scanIntervalSeconds: scan,
+          advIntervalSeconds: adv,
+          scanWindowSeconds: win
+        }
+      }) as Animal;
+    const state = (time: number, animals: Animal[]): SimulationState =>
+      ({
+        time,
+        config: { activePolicy: policy },
+        animals
+      }) as SimulationState;
+
+    const timeline = [
+      state(0, [stubAnimal("animal-1", 20, 4, 0), stubAnimal("animal-2", 20, 4, 0)]),
+      state(60, [stubAnimal("animal-1", 20, 4, 1), stubAnimal("animal-2", 20, 4, 1)])
+    ];
+    const series = buildFixedBleTimeSeries(timeline);
+    expect(series[0]!.noScanWindow).toBe(true);
+    expect(series[1]!.noScanWindow).toBe(false);
   });
 
   it("includes awake stationary rows in animal strip events", () => {

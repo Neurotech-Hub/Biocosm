@@ -17,15 +17,15 @@ export const defaultBleScheduling: BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: 0.2
 };
 
-/** Matches JUXTA nRF52840 `main.c` operatingMode 0 (non-connectable adv, passive scan). */
+/** Juxta5-8-nRF prod-style discovery: 20 s scan / 1 s adv / 500 ms non-connectable adv burst (bench README). */
 export const juxtaMainCMode0FixedPolicy: FixedPolicyConfig = {
   id: "juxta-mainc-mode0",
   type: "fixed",
-  name: "JUXTA main.c mode 0 (5s adv / 20s scan)",
+  name: "Juxta5-8 prod discovery (1 s adv / 20 s scan, 500 ms burst)",
   scanIntervalSeconds: 20,
   scanWindowSeconds: 1.5,
-  advIntervalSeconds: 5,
-  advertisingBurstDurationSeconds: 2
+  advIntervalSeconds: 1,
+  advertisingBurstDurationSeconds: 0.5
 };
 
 const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
@@ -117,14 +117,17 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  /** Matches `blePolicyPresetId` general-discovery (20s scan / 1.5s win / 5s adv); lower duty than sweep-style fixed rows. */
+  /** Matches `blePolicyPresetId` general-discovery (20 s scan / 1.5 s win / 1 s adv / 500 ms burst). */
   activePolicy: { ...generalDiscoveryFixedPolicy }
 };
 
-/** Datasheet Social Mode average draw (Adv 5 s / Scan 20 s), µA — use with `milliampHoursFromMeanMicroAmps`. */
-export const JUXTA_DATASHEET_SOCIAL_MODE_MICRO_AMPS = 233.09 as const;
+/**
+ * Juxta5-8-nRF measured mean current at battery terminals for production routine (1 s adv / 20 s scan).
+ * See https://github.com/Neurotech-Hub/Juxta5-8-nRF/blob/main/applications/juxta5-8-prod/README.md#measured-current-draw-battery-terminals
+ */
+export const JUXTA5_8_MEASURED_PROD_ROUTINE_MEAN_MICRO_AMPS = 467.891 as const;
 
-/** mAh over `hours` at constant average `meanMicroAmps` (e.g. 233.09 µA × 24 h ≈ 5.59 mAh). */
+/** mAh over `hours` at constant average `meanMicroAmps` (e.g. 467.891 µA × 24 h ≈ 11.23 mAh). */
 export function milliampHoursFromMeanMicroAmps(meanMicroAmps: number, hours: number): number {
   return (meanMicroAmps / 1000) * hours;
 }

@@ -23,15 +23,16 @@ export function deviceLifetimeDaysFromMeanMicroAmps(
   return batteryCapacityMah / mahPerDay;
 }
 
-function isJuxtaMaincSocialFixedPolicy(policy: SimulationState["config"]["activePolicy"]): boolean {
+function matchesJuxta5BenchDiscoveryFixedPolicy(policy: SimulationState["config"]["activePolicy"]): boolean {
   if (policy.type !== "fixed") {
     return false;
   }
+  const burst = policy.advertisingBurstDurationSeconds ?? 0.5;
   return (
     policy.scanIntervalSeconds === 20 &&
-    policy.advIntervalSeconds === 5 &&
+    policy.advIntervalSeconds === 1 &&
     policy.scanWindowSeconds === 1.5 &&
-    (policy.advertisingBurstDurationSeconds ?? 2) === 2
+    Math.abs(burst - 0.5) < 1e-9
   );
 }
 
@@ -40,14 +41,17 @@ function energyModelWarningFor(
   meanEnergyCurrentMicroAmpsPerCollar: number
 ): string | undefined {
   const { energy, activePolicy } = state.config;
-  if (!isJuxtaMaincSocialFixedPolicy(activePolicy)) {
+  if (energy.energyModel === "bench_duration") {
+    return undefined;
+  }
+  if (!matchesJuxta5BenchDiscoveryFixedPolicy(activePolicy)) {
     return undefined;
   }
   if (state.time < 60) {
     return undefined;
   }
   if (meanEnergyCurrentMicroAmpsPerCollar > 3 * energy.measuredSocial5s20sTotalMicroAmps) {
-    return "Predicted draw is more than 3× the configured bench reference total — check for burst-wall × TX-style double counting or a policy mismatch.";
+    return "Predicted draw is more than 3× the configured Juxta5-8 bench reference (467.891 µA prod routine) — check for burst-wall × TX-style double counting or a policy mismatch.";
   }
   return undefined;
 }
