@@ -4,6 +4,7 @@ import {
   DEFAULT_BLE_POLICY_PRESET_ID,
   fixedPolicyFromPreset
 } from "./blePolicyPresets";
+import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "./bleTimingAssumptions";
 import { DEFAULT_HARDWARE_ENERGY_PROFILE_ID, energyConfigFromHardwareProfileId } from "./hardwareEnergyProfiles";
 import { DEFAULT_SPECIES_PRESET_ID } from "./speciesPresets";
 import { defaultSpeciesModifiers } from "./speciesModifiers";
@@ -17,15 +18,15 @@ export const defaultBleScheduling: BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: 0.2
 };
 
-/** Juxta5-8-nRF prod-style discovery: 20 s scan / 1 s adv / 500 ms non-connectable adv burst (bench README). */
+/** Juxta5-8-nRF prod-style discovery: 20 s scan interval / 1 s adv interval with fixed burst assumptions. */
 export const juxtaMainCMode0FixedPolicy: FixedPolicyConfig = {
   id: "juxta-mainc-mode0",
   type: "fixed",
-  name: "Juxta5-8 prod discovery (1 s adv / 20 s scan, 500 ms burst)",
+  name: "Juxta5-8 prod discovery (1 s adv / 20 s scan)",
   scanIntervalSeconds: 20,
-  scanWindowSeconds: 1.5,
+  scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
   advIntervalSeconds: 1,
-  advertisingBurstDurationSeconds: 0.5
+  advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
 };
 
 const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
@@ -39,11 +40,11 @@ export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPre
 export const sweepStyleFixedProximityDdPolicy: FixedPolicyConfig = {
   type: "fixed",
   id: "sweep-fixed-s5-a1.25-w0.5-dd",
-  name: "Fixed 5s scan / 0.5s win / 1.25s adv — inactive scan ×2",
+  name: "Fixed 5s scan / 1.25s adv — inactive scan ×2",
   scanIntervalSeconds: 5,
-  scanWindowSeconds: 0.5,
+  scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
   advIntervalSeconds: 1.25,
-  advertisingBurstDurationSeconds: 2,
+  advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS,
   doubleWhenInactive: true,
   inactiveScanIntervalMultiplier: 2
 };

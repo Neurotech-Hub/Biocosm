@@ -9,9 +9,9 @@ const baseCollar = {
   scanActive: false,
   advActive: false,
   scanIntervalSeconds: 10,
-  scanWindowSeconds: 1.5,
+  scanWindowSeconds: 3,
   advIntervalSeconds: 5,
-  advertisingBurstDurationSeconds: 2,
+  advertisingBurstDurationSeconds: 0.5,
   scanPhaseOffsetSeconds: 0,
   advPhaseOffsetSeconds: 0,
   motionDrive: 0.5,
@@ -39,7 +39,7 @@ const fixedPolicyBase: FixedPolicyConfig = {
   id: "test-fixed",
   name: "Test",
   scanIntervalSeconds: 20,
-  scanWindowSeconds: 1.5,
+  scanWindowSeconds: 3,
   advIntervalSeconds: 10
 };
 
@@ -87,7 +87,7 @@ describe("applyFixedRatePolicy", () => {
     expect(noMotion.collar.scanWindowSeconds).toBe(0);
     expect(noMotion.collar.scanIntervalSeconds).toBe(20);
     const motion = applyFixedRatePolicy(animalWithStreak(10), policy, 0, 60, obs(true));
-    expect(motion.collar.scanWindowSeconds).toBe(1.5);
+    expect(motion.collar.scanWindowSeconds).toBe(3);
   });
 
   it("Inf multiplier does not apply bout-based interval stretch", () => {

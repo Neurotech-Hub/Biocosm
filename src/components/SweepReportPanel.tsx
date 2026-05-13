@@ -147,7 +147,6 @@ const SWEEP_METRIC_COLUMNS = [
   "pw",
   "tauPeer",
   "scanInt",
-  "scanWin",
   "advInt",
   "capture",
   "mAh",
@@ -164,7 +163,6 @@ const SWEEP_TABLE_SORT_KEYS = [
   "pw",
   "tauPeer",
   "scanInt",
-  "scanWin",
   "advInt",
   "capture",
   "mAh",
@@ -182,7 +180,6 @@ const SWEEP_COLUMN_SENTIMENT: Record<SweepMetricColumn, "higherBetter" | "lowerB
   pw: "higherBetter",
   tauPeer: "higherBetter",
   scanInt: "higherBetter",
-  scanWin: "higherBetter",
   advInt: "higherBetter",
   capture: "higherBetter",
   mAh: "lowerBetter",
@@ -231,9 +228,6 @@ function extractSweepMetricValue(
   }
   if (column === "scanInt") {
     return p?.family === "fixed" ? p.scanIntervalSeconds : null;
-  }
-  if (column === "scanWin") {
-    return p?.family === "fixed" ? p.scanWindowSeconds : null;
   }
   if (column === "advInt") {
     return p?.family === "fixed" ? p.advIntervalSeconds : null;
@@ -475,7 +469,7 @@ export function SweepReportPanel({
   };
 
   const hasResult = Boolean(sweepResult);
-  const sweepTableColSpan = 14;
+  const sweepTableColSpan = 13;
 
   return (
     <div className="sweep-report-panel">
@@ -541,10 +535,11 @@ export function SweepReportPanel({
               </dd>
               <dt>bd / mw / pw / τ peer</dt>
               <dd>Adaptive swept parameters only (— for fixed-rate rows).</dd>
-              <dt>Scan / Win / Advertise</dt>
+              <dt>Scan / Advertise</dt>
               <dd>
-                Configured fixed-rate schedule: <strong>scan interval</strong>, <strong>scan (listen) window</strong>, and{" "}
-                <strong>advertise interval</strong> (seconds between advertising bursts). Em dash for adaptive rows.
+                Configured fixed-rate schedule: <strong>scan interval</strong> and <strong>advertise interval</strong>{" "}
+                (seconds between bursts). Scan burst duration is a fixed 3 s simulator assumption, not a swept column.
+                Em dash for adaptive rows.
               </dd>
               <dt>Capture</dt>
               <dd>Mean interval-level BLE capture rate across seeds included in this run.</dd>
@@ -580,7 +575,6 @@ export function SweepReportPanel({
                     ["pw", "pw", "Peer weight"],
                     ["tauPeer", "τ peer", "τ peer (s)"],
                     ["scanInt", "Scan int. (s)", "BLE scan interval"],
-                    ["scanWin", "Scan win. (s)", "Scan burst listen window"],
                     ["advInt", "Adv. Int. (s)", "Interval between advertising bursts"],
                     ["capture", "Capture", "Mean BLE capture rate"],
                     ["mAh", "mAh/day", "Mean energy burden"],
@@ -714,7 +708,6 @@ function SweepTableRow({
   const pw = p?.family === "adaptive" ? p.peerWeight : "—";
   const tau = p?.family === "adaptive" ? p.tauPeerSeconds : "—";
   const scanInt = p?.family === "fixed" ? p.scanIntervalSeconds : "—";
-  const scanWin = p?.family === "fixed" ? p.scanWindowSeconds : "—";
   const advInt = p?.family === "fixed" ? p.advIntervalSeconds : "—";
 
   const policyTip = policyHoverLabel(summary);
@@ -747,7 +740,6 @@ function SweepTableRow({
       <td style={cell("pw")}>{pw}</td>
       <td style={cell("tauPeer")}>{tau}</td>
       <td style={cell("scanInt")}>{scanInt}</td>
-      <td style={cell("scanWin")}>{scanWin}</td>
       <td style={cell("advInt")}>{advInt}</td>
       <td style={cell("capture")}>{summary.meanCaptureRate.toFixed(4)}</td>
       <td style={cell("mAh")}>{summary.meanMahPerDay.toFixed(4)}</td>

@@ -161,8 +161,19 @@ export type BleSchedulingConfig = {
   scanPreStartRadioStabilizationSeconds: number;
 };
 
-/** `component`: RX mA × listen-window seconds + adv µC × packet count. `bench_duration`: wall-time × bench-calibrated µA. */
-export type EnergyModel = "component" | "bench_duration";
+/**
+ * `component`: RX mA × listen-window seconds + adv µC × packet count.
+ * `bench_duration`: wall-time × bench-calibrated µA per burst kind.
+ * `bench_routine_linear_v1`: empirical routine mean current linear in realized scan/advertise duties (burst wall time / epoch).
+ */
+export type EnergyModel = "component" | "bench_duration" | "bench_routine_linear_v1";
+
+/** Coefficients for `bench_routine_linear_v1` (mixed-routine bench fit). */
+export type RoutineLinearEnergyCoefficients = {
+  interceptCurrentUa: number;
+  scanDutyCoeffUa: number;
+  advDutyCoeffUa: number;
+};
 
 export type EnergyConfig = {
   batteryCapacityMah: number;
@@ -201,8 +212,7 @@ export type EnergyConfig = {
    */
   benchProductionAdvDuty: number;
   /**
-   * Long-run scan burst wall-time fraction matching the sim schedule (e.g. 1.5 s window / 20 s interval), not necessarily
-   * firmware’s 3 s passive burst length.
+   * Long-run scan burst wall-time fraction for legacy `bench_duration`; routine-linear uses fixed 3 s scan bursts.
    */
   benchProductionScanDuty: number;
   /**
@@ -210,6 +220,8 @@ export type EnergyConfig = {
    * matches measured production mean (sim defers/jitter/epoch clipping vs ideal duties). Profile-only; not shown in UI.
    */
   benchWallTimeCalibrationScale?: number;
+  /** Optional overrides for `bench_routine_linear_v1`; unset fields use built-in defaults. */
+  routineLinearEnergyCoefficients?: Partial<RoutineLinearEnergyCoefficients>;
 };
 
 export type FixedPolicyConfig = {

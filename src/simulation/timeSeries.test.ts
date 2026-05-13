@@ -60,7 +60,7 @@ describe("time series helpers", () => {
       scanIntervalSeconds: 10,
       scanWindowSeconds: 1,
       advIntervalSeconds: 4,
-      advertisingBurstDurationSeconds: 2
+      advertisingBurstDurationSeconds: 0.5
     };
     const stubAnimal = (id: string, scan: number, adv: number, win: number): Animal =>
       ({
@@ -86,7 +86,7 @@ describe("time series helpers", () => {
     expect(series).toHaveLength(2);
     expect(series[0]!.scanIntervalSeconds).toBe(30);
     expect(series[1]!.scanIntervalSeconds).toBe(30);
-    expect(series[0]!.envelopeDuty).toBeCloseTo(1 / 30 + 2 / 4);
+    expect(series[0]!.envelopeDuty).toBeCloseTo(1 / 30 + 0.5 / 4);
     expect(series[0]!.noScanWindow).toBe(false);
     expect(series[1]!.noScanWindow).toBe(false);
   });
@@ -99,7 +99,7 @@ describe("time series helpers", () => {
       scanIntervalSeconds: 10,
       scanWindowSeconds: 1,
       advIntervalSeconds: 4,
-      advertisingBurstDurationSeconds: 2
+      advertisingBurstDurationSeconds: 0.5
     };
     const stubAnimal = (id: string, scan: number, adv: number, win: number): Animal =>
       ({

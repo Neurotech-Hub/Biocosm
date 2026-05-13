@@ -4,10 +4,39 @@ import {
   totalBleBurstWallSeconds,
   totalScanListenWindowSeconds
 } from "./radio";
-import type { BleBurstEvent, EnergyConfig, EnergyLog } from "./types";
+import type { BleBurstEvent, EnergyConfig, EnergyLog, RoutineLinearEnergyCoefficients } from "./types";
 
 /** 1 mAh = 1 mA × 1 h = 3.6 C = 3_600_000 µC */
 export const MICROCOULOMBS_PER_MILLIAMP_HOUR = 3_600_000;
+
+/** Mixed-routine bench fit for `bench_routine_linear_v1` (not isolated scan-burst coefficients). */
+export const ROUTINE_LINEAR_ENERGY_COEFFICIENTS: RoutineLinearEnergyCoefficients = {
+  interceptCurrentUa: 132.2,
+  scanDutyCoeffUa: 725.6,
+  advDutyCoeffUa: 716.0
+};
+
+export function routineLinearCoeffsResolved(config: EnergyConfig): RoutineLinearEnergyCoefficients {
+  const o = config.routineLinearEnergyCoefficients;
+  return {
+    interceptCurrentUa: o?.interceptCurrentUa ?? ROUTINE_LINEAR_ENERGY_COEFFICIENTS.interceptCurrentUa,
+    scanDutyCoeffUa: o?.scanDutyCoeffUa ?? ROUTINE_LINEAR_ENERGY_COEFFICIENTS.scanDutyCoeffUa,
+    advDutyCoeffUa: o?.advDutyCoeffUa ?? ROUTINE_LINEAR_ENERGY_COEFFICIENTS.advDutyCoeffUa
+  };
+}
+
+export function routineLinearAvgCurrentMicroAmps(
+  scanDuty: number,
+  advDuty: number,
+  coeffs: RoutineLinearEnergyCoefficients = ROUTINE_LINEAR_ENERGY_COEFFICIENTS
+): number {
+  return coeffs.interceptCurrentUa + coeffs.scanDutyCoeffUa * scanDuty + coeffs.advDutyCoeffUa * advDuty;
+}
+
+/** Epoch mAh from mean current (µA): (µA / 1000) × (epochSeconds / 3600) = mAh. */
+export function routineLinearEpochMahFromAvgUa(avgCurrentUa: number, epochSeconds: number): number {
+  return (avgCurrentUa / 1000) * (epochSeconds / 3600);
+}
 
 /** mAh = (µA × seconds) / 3_600_000 */
 function microAmpSecondsToMilliampHours(microAmps: number, seconds: number): number {
@@ -44,6 +73,35 @@ export function computeEnergyLog(
   config: EnergyConfig,
   previousCumulativeMah = 0
 ): EnergyLog {
+  if (config.energyModel === "bench_routine_linear_v1") {
+    const coeffs = routineLinearCoeffsResolved(config);
+    const scanWall = totalBleBurstWallSeconds(bursts, "scan");
+    const advWall = totalBleBurstWallSeconds(bursts, "advertise");
+    const safeEpoch = epochSeconds > 1e-12 ? epochSeconds : 0;
+    const scanDuty = safeEpoch > 0 ? scanWall / safeEpoch : 0;
+    const advDuty = safeEpoch > 0 ? advWall / safeEpoch : 0;
+    const avgCurrentUa = routineLinearAvgCurrentMicroAmps(scanDuty, advDuty, coeffs);
+    const steadyMah = routineLinearEpochMahFromAvgUa(coeffs.interceptCurrentUa, safeEpoch);
+    const scanMah = routineLinearEpochMahFromAvgUa(coeffs.scanDutyCoeffUa * scanDuty, safeEpoch);
+    const advertisingMah = routineLinearEpochMahFromAvgUa(coeffs.advDutyCoeffUa * advDuty, safeEpoch);
+    const totalMah = routineLinearEpochMahFromAvgUa(avgCurrentUa, safeEpoch);
+    const cumulativeMah = previousCumulativeMah + totalMah;
+    const remainingMah = Math.max(0, config.batteryCapacityMah - cumulativeMah);
+    const remainingPercent = config.batteryCapacityMah > 0 ? remainingMah / config.batteryCapacityMah : 0;
+
+    return {
+      time,
+      steadyMah,
+      scanMah,
+      advertisingMah,
+      totalMah,
+      cumulativeMah,
+      remainingMah,
+      remainingPercent,
+      estimatedVoltage: estimateLipoVoltage(remainingPercent, config.startingVoltage)
+    };
+  }
+
   const steadyMah = microAmpSecondsToMilliampHours(config.baselineCurrentMicroAmps, epochSeconds);
 
   if (config.energyModel === "bench_duration") {

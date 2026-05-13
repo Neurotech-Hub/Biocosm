@@ -4,11 +4,13 @@ import {
   blePolicyPresetIdForFixedPolicy,
   blePolicyPresets,
   BLE_POLICY_CUSTOM_ID,
+  fixedPolicyWithBurstAssumptions,
   fixedPolicyFromPreset,
   getBlePolicyPreset,
   motionPeerAdaptiveWithBleBaselineAnchors,
   normalizeBlePolicyPresetId
 } from "../simulation/blePolicyPresets";
+import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
 import { defaultAdaptivePolicy, generalDiscoveryFixedPolicy } from "../simulation/config";
 import {
   applyHardwareProfileToEnergy,
@@ -52,6 +54,29 @@ type ControlsPanelProps = {
   onShowTrueProximityChange: (show: boolean) => void;
   onShowObservedDetectionsChange: (show: boolean) => void;
 };
+
+function motionPeerAdaptiveWithFixedBursts(
+  policy: MotionPeerAdaptivePolicyConfig
+): MotionPeerAdaptivePolicyConfig {
+  return {
+    ...policy,
+    timingAnchors: {
+      lowIntensity: {
+        ...policy.timingAnchors.lowIntensity,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
+      },
+      neutral: {
+        ...policy.timingAnchors.neutral,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
+      },
+      highIntensity: {
+        ...policy.timingAnchors.highIntensity,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
+      },
+      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+    }
+  };
+}
 
 type BuildProgress = {
   isBuilding: boolean;
@@ -123,7 +148,7 @@ export function ControlsPanel({
   const updateAdaptivePolicy = (policy: MotionPeerAdaptivePolicyConfig) => {
     onConfigChange({
       ...config,
-      activePolicy: policy
+      activePolicy: motionPeerAdaptiveWithFixedBursts(policy)
     });
   };
 
@@ -170,16 +195,44 @@ export function ControlsPanel({
     onConfigChange(next);
   }, [config.hardwareEnergyProfileId]);
 
+  useEffect(() => {
+    if (config.activePolicy.type === "fixed") {
+      const normalized = fixedPolicyWithBurstAssumptions(config.activePolicy);
+      if (
+        normalized.scanWindowSeconds !== config.activePolicy.scanWindowSeconds ||
+        normalized.advertisingBurstDurationSeconds !== config.activePolicy.advertisingBurstDurationSeconds
+      ) {
+        onConfigChange({ ...config, activePolicy: normalized });
+      }
+      return;
+    }
+
+    const normalized = motionPeerAdaptiveWithFixedBursts(config.activePolicy);
+    if (
+      normalized.timingAnchors.advertisingBurstDurationSeconds !==
+        config.activePolicy.timingAnchors.advertisingBurstDurationSeconds ||
+      normalized.timingAnchors.lowIntensity.scanWindowSeconds !==
+        config.activePolicy.timingAnchors.lowIntensity.scanWindowSeconds ||
+      normalized.timingAnchors.neutral.scanWindowSeconds !== config.activePolicy.timingAnchors.neutral.scanWindowSeconds ||
+      normalized.timingAnchors.highIntensity.scanWindowSeconds !==
+        config.activePolicy.timingAnchors.highIntensity.scanWindowSeconds
+    ) {
+      onConfigChange({ ...config, activePolicy: normalized });
+    }
+  }, [config.activePolicy]);
+
   const syncFixedPolicyAndPreset = (fixed: FixedPolicyConfig) => {
+    const normalizedFixed = fixedPolicyWithBurstAssumptions(fixed);
     onConfigChange({
       ...config,
-      blePolicyPresetId: blePolicyPresetIdForFixedPolicy(fixed),
-      activePolicy: fixed
+      blePolicyPresetId: blePolicyPresetIdForFixedPolicy(normalizedFixed),
+      activePolicy: normalizedFixed
     });
   };
 
   const neutralBaseline = bleBaselinePresetDefForSweep(config);
-  const isBenchDurationEnergy = config.energy.energyModel === "bench_duration";
+  const energyModel = config.energy.energyModel;
+  const usesSimpleBatterySliders = energyModel === "bench_duration" || energyModel === "bench_routine_linear_v1";
 
   return (
     <aside className={`panel controls-panel${isBuildDirty ? " controls-panel--stale" : ""}`}>
@@ -643,23 +696,6 @@ export function ControlsPanel({
           </label>
 
           <label>
-            Scan burst duration: {fixedPolicy.scanWindowSeconds.toFixed(1)}s
-            <input
-              type="range"
-              min="0.5"
-              max="5"
-              step="0.5"
-              value={fixedPolicy.scanWindowSeconds}
-              onChange={(event) =>
-                syncFixedPolicyAndPreset({
-                  ...fixedPolicy,
-                  scanWindowSeconds: Number(event.target.value)
-                })
-              }
-            />
-          </label>
-
-          <label>
             Advertise interval: {fixedPolicy.advIntervalSeconds}s
             <input
               type="range"
@@ -676,22 +712,11 @@ export function ControlsPanel({
             />
           </label>
 
-          <label>
-            Advertise burst duration: {(fixedPolicy.advertisingBurstDurationSeconds ?? 2).toFixed(1)}s
-            <input
-              type="range"
-              min="0.5"
-              max="5"
-              step="0.5"
-              value={fixedPolicy.advertisingBurstDurationSeconds ?? 2}
-              onChange={(event) =>
-                syncFixedPolicyAndPreset({
-                  ...fixedPolicy,
-                  advertisingBurstDurationSeconds: Number(event.target.value)
-                })
-              }
-            />
-          </label>
+          <p className="helper-text">
+            Burst durations are fixed assumptions: scan {FIXED_SCAN_BURST_SECONDS}s and advertise{" "}
+            {FIXED_ADVERTISING_BURST_SECONDS}s. They affect capture scheduling, but are not exposed as energy tuning
+            controls.
+          </p>
 
           <label className="checkbox-label">
             <input
@@ -972,7 +997,8 @@ export function ControlsPanel({
             ) : (
               <p className="helper-text">
                 Neutral stays locked to the BLE policy baseline: {neutralBaseline.scanIntervalSeconds}s scan,{" "}
-                {neutralBaseline.scanWindowSeconds}s window, {neutralBaseline.advIntervalSeconds}s advertise.
+                {neutralBaseline.advIntervalSeconds}s advertise. Burst durations stay fixed at scan{" "}
+                {FIXED_SCAN_BURST_SECONDS}s and advertise {FIXED_ADVERTISING_BURST_SECONDS}s.
               </p>
             )}
           </details>
@@ -982,13 +1008,24 @@ export function ControlsPanel({
 
       <section className="control-section">
         <h3>Energy / Battery</h3>
-        {isBenchDurationEnergy ? (
+        {usesSimpleBatterySliders ? (
           <>
-            <p className="helper-text">
-              Bench-calibrated model: per epoch, shelf draw plus advertise and scan burst <strong>wall times</strong>{" "}
-              multiplied by currents derived from Juxta5-8 README measurements (calibrated so the default 1 s adv / 20 s
-              scan routine matches the production mean). Radio is assumed at <strong>+8 dBm</strong> (fixed).
-            </p>
+            {energyModel === "bench_duration" ? (
+              <p className="helper-text">
+                Bench-calibrated model: per epoch, shelf draw plus advertise and scan burst <strong>wall times</strong>{" "}
+                multiplied by currents derived from Juxta5-8 README measurements (calibrated so the default 1 s adv / 20 s
+                scan routine matches the production mean). Radio is assumed at <strong>+8 dBm</strong> (fixed).
+              </p>
+            ) : null}
+            {energyModel === "bench_routine_linear_v1" ? (
+              <p className="helper-text">
+                Routine-level linear model (bench fit): mean current µA = intercept + scan-duty coefficient × (realized
+                scan burst wall seconds / epoch) + advertise-duty coefficient × (realized advertise burst wall seconds /
+                epoch). Duties use fixed burst assumptions (scan {FIXED_SCAN_BURST_SECONDS}s, advertise{" "}
+                {FIXED_ADVERTISING_BURST_SECONDS}s) plus scheduler effects such as clipping and safe zones. Not packet-level
+                physics. Radio prior is <strong>+8 dBm</strong> (fixed).
+              </p>
+            ) : null}
             <p className="helper-text">
               <strong>Hardware energy profile:</strong>{" "}
               {hardwareEnergyProfiles[DEFAULT_HARDWARE_ENERGY_PROFILE_ID]?.label ?? "Generic nRF52840 BLE wearable"}
@@ -1210,16 +1247,6 @@ function TimingAnchorControls({
           />
         </label>
         <label>
-          Scan window
-          <input
-            type="number"
-            min="0.05"
-            step="0.05"
-            value={timing.scanWindowSeconds}
-            onChange={(event) => updateTiming("scanWindowSeconds", Number(event.target.value))}
-          />
-        </label>
-        <label>
           Adv interval
           <input
             type="number"
@@ -1230,6 +1257,10 @@ function TimingAnchorControls({
           />
         </label>
       </div>
+      <p className="helper-text">
+        Scan burst is fixed at {FIXED_SCAN_BURST_SECONDS}s; advertise burst is fixed at{" "}
+        {FIXED_ADVERTISING_BURST_SECONDS}s.
+      </p>
     </div>
   );
 }
@@ -1304,7 +1335,6 @@ function timingMatches(
   b: MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"]
 ): boolean {
   return nearlyEqual(a.scanIntervalSeconds, b.scanIntervalSeconds) &&
-    nearlyEqual(a.scanWindowSeconds, b.scanWindowSeconds) &&
     nearlyEqual(a.advIntervalSeconds, b.advIntervalSeconds);
 }
 
@@ -1314,16 +1344,16 @@ function nearlyEqual(a: number, b: number): boolean {
 
 const adaptiveRangePresets = {
   conservative: {
-    lowIntensity: { scanIntervalSeconds: 40, scanWindowSeconds: 1, advIntervalSeconds: 10 },
-    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 2, advIntervalSeconds: 2 }
+    lowIntensity: { scanIntervalSeconds: 40, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 10 },
+    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 2 }
   },
   balanced: {
-    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 0.5, advIntervalSeconds: 20 },
-    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: 3, advIntervalSeconds: 1 }
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 20 },
+    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 1 }
   },
   aggressive: {
-    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: 0.25, advIntervalSeconds: 30 },
-    highIntensity: { scanIntervalSeconds: 2, scanWindowSeconds: 4, advIntervalSeconds: 0.5 }
+    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 30 },
+    highIntensity: { scanIntervalSeconds: 2, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 0.5 }
   }
 } as const;
 

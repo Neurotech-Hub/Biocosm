@@ -10,7 +10,7 @@ export type PredictedPolicyCandidate = {
   motionWeight: number;
   peerWeight: number;
   tauPeerSeconds: number;
-  /** Present when source is observed_fixed (scan / listen window / advertise interval, seconds). */
+  /** Present when source is observed_fixed (scan interval / fixed scan burst / advertise interval, seconds). */
   fixedScanIntervalSeconds?: number | null;
   fixedScanWindowSeconds?: number | null;
   fixedAdvIntervalSeconds?: number | null;

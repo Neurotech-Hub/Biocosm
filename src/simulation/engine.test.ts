@@ -506,13 +506,13 @@ describe("simulation engine", () => {
     const high = mapAdaptiveTiming(0.75, defaultAdaptivePolicy.timingAnchors);
 
     expect(neutral.scanIntervalSeconds).toBeCloseTo(20);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(3);
     expect(neutral.advIntervalSeconds).toBeCloseTo(5);
     expect(low.scanIntervalSeconds).toBeGreaterThan(neutral.scanIntervalSeconds);
-    expect(low.scanWindowSeconds).toBeLessThan(neutral.scanWindowSeconds);
+    expect(low.scanWindowSeconds).toBeCloseTo(neutral.scanWindowSeconds);
     expect(low.advIntervalSeconds).toBeGreaterThan(neutral.advIntervalSeconds);
     expect(high.scanIntervalSeconds).toBeLessThan(neutral.scanIntervalSeconds);
-    expect(high.scanWindowSeconds).toBeGreaterThan(neutral.scanWindowSeconds);
+    expect(high.scanWindowSeconds).toBeCloseTo(neutral.scanWindowSeconds);
     expect(high.advIntervalSeconds).toBeLessThan(neutral.advIntervalSeconds);
   });
 
@@ -680,11 +680,11 @@ describe("simulation engine", () => {
           peerDrive: 1,
           samplingDrive: 0.8,
           scanIntervalSeconds: 10,
-          scanWindowSeconds: 2,
+          scanWindowSeconds: 3,
           advIntervalSeconds: 2,
-          advertisingBurstDurationSeconds: 2,
-          combinedEnvelopeDuty: 1.2,
-          saturatedScheduleWarning: true
+          advertisingBurstDurationSeconds: 0.5,
+          combinedEnvelopeDuty: 0.55,
+          saturatedScheduleWarning: false
         }
       ]
     });
@@ -822,9 +822,9 @@ function animalAt(id: string, x: number, y: number): Animal {
       scanActive: false,
       advActive: false,
       scanIntervalSeconds: 60,
-      scanWindowSeconds: 1.5,
+      scanWindowSeconds: 3,
       advIntervalSeconds: 60,
-      advertisingBurstDurationSeconds: 2,
+      advertisingBurstDurationSeconds: 0.5,
       scanPhaseOffsetSeconds: 0,
       advPhaseOffsetSeconds: 0,
       motionDrive: 0,

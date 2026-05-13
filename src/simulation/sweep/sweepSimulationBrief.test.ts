@@ -15,6 +15,7 @@ describe("buildSweepSimulationBrief", () => {
     expect(byLabel["Collar policy"]).toMatch(/Sweep substitutes/);
     expect(byLabel["Comparison BLE baseline"]).toMatch(/General discovery/);
     expect(byLabel["Hardware energy profile"]).toMatch(/Generic nRF52840/);
+    expect(byLabel.Energy).toMatch(/Routine-linear/);
   });
 
   it("uses report seeds in report mode", () => {

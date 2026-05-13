@@ -1,3 +1,4 @@
+import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "./bleTimingAssumptions";
 import type {
   AdaptiveBleTimingAnchors,
   FixedPolicyConfig,
@@ -35,11 +36,11 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     id: "general-discovery",
     label: "General discovery",
     description:
-      "Recommended starting point for proximity logging: 1 s advertise cadence, 20 s scan interval, 1.5 s listen window, 500 ms non-connectable adv bursts (Juxta5-8-nRF prod bench; scan window is shorter than firmware 3 s passive burst).",
+      "Recommended starting point for proximity logging: 1 s advertise cadence, 20 s scan interval, 3 s passive scan burst, 500 ms non-connectable adv bursts.",
     scanIntervalSeconds: 20,
-    scanWindowSeconds: 1.5,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: 1,
-    advertisingBurstDurationSeconds: 0.5
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   },
   "general-low-power": {
     id: "general-low-power",
@@ -47,18 +48,18 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     description:
       "Lower-energy asymmetric schedule that preserves more frequent advertising while reducing scan effort.",
     scanIntervalSeconds: 40,
-    scanWindowSeconds: 1.0,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: 10,
-    advertisingBurstDurationSeconds: 2
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   },
   "general-high-capture": {
     id: "general-high-capture",
     label: "General high-capture",
     description: "Aggressive discovery schedule for higher capture rate at higher energy cost.",
     scanIntervalSeconds: 10,
-    scanWindowSeconds: 2.5,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: 2.5,
-    advertisingBurstDurationSeconds: 2
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   },
   "symmetric-example": {
     id: "symmetric-example",
@@ -66,19 +67,19 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     description:
       "Educational comparison: scan and advertise at the same interval. Often intuitive but not necessarily efficient for BLE discovery.",
     scanIntervalSeconds: 30,
-    scanWindowSeconds: 2,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: 30,
-    advertisingBurstDurationSeconds: 2
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   },
   "juxta-v56-social": {
     id: "juxta-v56-social",
     label: "Juxta v5/6 social mode",
     description:
-      "Juxta-specific label; numerically aligned with General discovery (1 s adv / 20 s scan, 500 ms adv burst).",
+      "Juxta-specific label; numerically aligned with General discovery (1 s adv / 20 s scan, 3 s scan burst, 500 ms adv burst).",
     scanIntervalSeconds: 20,
-    scanWindowSeconds: 1.5,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: 1,
-    advertisingBurstDurationSeconds: 0.5
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   }
 };
 
@@ -102,15 +103,23 @@ export function fixedPolicyFromPreset(preset: BlePolicyPresetDef): FixedPolicyCo
     type: "fixed",
     name: preset.label,
     scanIntervalSeconds: preset.scanIntervalSeconds,
-    scanWindowSeconds: preset.scanWindowSeconds,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: preset.advIntervalSeconds,
-    advertisingBurstDurationSeconds: preset.advertisingBurstDurationSeconds
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+  };
+}
+
+export function fixedPolicyWithBurstAssumptions(policy: FixedPolicyConfig): FixedPolicyConfig {
+  return {
+    ...policy,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   };
 }
 
 /** Infer preset id when fixed schedule matches a catalog entry (else custom). */
 export function blePolicyPresetIdForFixedPolicy(policy: FixedPolicyConfig): string {
-  const burst = policy.advertisingBurstDurationSeconds ?? 2;
+  const burst = policy.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
   for (const presetId of BLE_POLICY_PRESET_MATCH_ORDER) {
     const preset = blePolicyPresets[presetId];
     if (!preset) {
@@ -118,7 +127,7 @@ export function blePolicyPresetIdForFixedPolicy(policy: FixedPolicyConfig): stri
     }
     if (
       policy.scanIntervalSeconds === preset.scanIntervalSeconds &&
-      policy.scanWindowSeconds === preset.scanWindowSeconds &&
+      policy.scanWindowSeconds === FIXED_SCAN_BURST_SECONDS &&
       policy.advIntervalSeconds === preset.advIntervalSeconds &&
       burst === preset.advertisingBurstDurationSeconds
     ) {
@@ -142,27 +151,25 @@ export function referenceDiscoveryBlePreset(): BlePolicyPresetDef {
  * Other presets use formula from baseline scan/adv/window.
  */
 export function buildAdaptiveAnchorsFromBaseline(preset: BlePolicyPresetDef): AdaptiveBleTimingAnchors {
-  const burst = preset.advertisingBurstDurationSeconds;
   if (preset.id === "general-discovery" || preset.id === "juxta-v56-social") {
-    /** Deployable “efficient discovery” region for sweeps: shorter scan windows, moderate intervals, 2 s adv bursts. */
-    void burst;
+    /** Deployable “efficient discovery” region for sweeps: moderate scan/adv intervals with fixed burst assumptions. */
     return {
       lowIntensity: {
         scanIntervalSeconds: 60,
-        scanWindowSeconds: 0.2,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
         advIntervalSeconds: 10
       },
       neutral: {
         scanIntervalSeconds: 20,
-        scanWindowSeconds: 0.5,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
         advIntervalSeconds: 5
       },
       highIntensity: {
         scanIntervalSeconds: 10,
-        scanWindowSeconds: 1,
+        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
         advIntervalSeconds: 0.2
       },
-      advertisingBurstDurationSeconds: 2
+      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
     };
   }
 
@@ -170,20 +177,20 @@ export function buildAdaptiveAnchorsFromBaseline(preset: BlePolicyPresetDef): Ad
   return {
     lowIntensity: {
       scanIntervalSeconds: Math.max(1, b.scanIntervalSeconds * 2),
-      scanWindowSeconds: Math.max(0.5, b.scanWindowSeconds * 0.5),
+      scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
       advIntervalSeconds: Math.max(1, b.advIntervalSeconds * 2)
     },
     neutral: {
       scanIntervalSeconds: b.scanIntervalSeconds,
-      scanWindowSeconds: b.scanWindowSeconds,
+      scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
       advIntervalSeconds: b.advIntervalSeconds
     },
     highIntensity: {
       scanIntervalSeconds: Math.max(1, b.scanIntervalSeconds / 4),
-      scanWindowSeconds: b.scanWindowSeconds * 1.5,
+      scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
       advIntervalSeconds: Math.max(1, b.advIntervalSeconds / 4)
     },
-    advertisingBurstDurationSeconds: burst
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   };
 }
 
@@ -200,7 +207,7 @@ export function baselineFixedPolicyForSweep(config: SimulationConfig): FixedPoli
     }
   }
   if (config.activePolicy.type === "fixed") {
-    return config.activePolicy;
+    return fixedPolicyWithBurstAssumptions(config.activePolicy);
   }
   return fixedPolicyFromPreset(getBlePolicyPreset(DEFAULT_BLE_POLICY_PRESET_ID)!);
 }
@@ -220,9 +227,9 @@ export function bleBaselinePresetDefForSweep(config: SimulationConfig): BlePolic
     label: "Custom",
     description: "Custom fixed schedule",
     scanIntervalSeconds: fixed.scanIntervalSeconds,
-    scanWindowSeconds: fixed.scanWindowSeconds,
+    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
     advIntervalSeconds: fixed.advIntervalSeconds,
-    advertisingBurstDurationSeconds: fixed.advertisingBurstDurationSeconds ?? 2
+    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
   };
 }
 

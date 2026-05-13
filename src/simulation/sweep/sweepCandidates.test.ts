@@ -36,7 +36,7 @@ describe("attachParetoEfficiency", () => {
     params: {
       family: "fixed",
       scanIntervalSeconds: 20,
-      scanWindowSeconds: 1.5,
+      scanWindowSeconds: 3,
       advIntervalSeconds: 5
     },
     meanCaptureRate: cap,

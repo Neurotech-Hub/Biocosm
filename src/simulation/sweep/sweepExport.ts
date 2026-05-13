@@ -24,7 +24,6 @@ const RAW_HEADERS = [
   "doubleWhenInactive",
   "inactiveScanIntervalMultiplier",
   "scheduledScanIntervalSeconds",
-  "scheduledScanWindowSeconds",
   "scheduledAdvIntervalSeconds",
   "scheduledAdvertisingBurstDurationSeconds",
   "baselineDrive",
@@ -50,7 +49,6 @@ const RAW_HEADERS = [
   "percentTimeNearFixed",
   "percentTimeAboveFixed",
   "meanScanIntervalSeconds",
-  "meanScanWindowSeconds",
   "meanAdvIntervalSeconds"
 ] as const;
 
@@ -65,7 +63,6 @@ export function serializeSweepRawCsv(rows: SweepRawRow[]): string {
         row.doubleWhenInactive ? "true" : "false",
         row.inactiveScanIntervalMultiplier ?? "",
         row.scheduledScanIntervalSeconds ?? "",
-        row.scheduledScanWindowSeconds ?? "",
         row.scheduledAdvIntervalSeconds ?? "",
         row.scheduledAdvertisingBurstDurationSeconds ?? "",
         row.baselineDrive ?? "",
@@ -91,7 +88,6 @@ export function serializeSweepRawCsv(rows: SweepRawRow[]): string {
         row.percentTimeNearFixed ?? "",
         row.percentTimeAboveFixed ?? "",
         row.meanScanIntervalSeconds,
-        row.meanScanWindowSeconds,
         row.meanAdvIntervalSeconds
       ]
         .map(csvEscape)
@@ -111,7 +107,6 @@ const SUMMARY_HEADERS = [
   "adaptive_peerWeight",
   "adaptive_tauPeerSeconds",
   "fixed_scanIntervalSeconds",
-  "fixed_scanWindowSeconds",
   "fixed_advIntervalSeconds",
   "meanCaptureRate",
   "stdCaptureRate",
@@ -130,11 +125,10 @@ function summaryParamColumns(params: SweepPolicyParams | null): {
   pw: string;
   tau: string;
   scan: string;
-  win: string;
   adv: string;
 } {
   if (!params) {
-    return { bd: "", mw: "", pw: "", tau: "", scan: "", win: "", adv: "" };
+    return { bd: "", mw: "", pw: "", tau: "", scan: "", adv: "" };
   }
   if (params.family === "adaptive") {
     return {
@@ -143,7 +137,6 @@ function summaryParamColumns(params: SweepPolicyParams | null): {
       pw: String(params.peerWeight),
       tau: String(params.tauPeerSeconds),
       scan: "",
-      win: "",
       adv: ""
     };
   }
@@ -153,7 +146,6 @@ function summaryParamColumns(params: SweepPolicyParams | null): {
     pw: "",
     tau: "",
     scan: String(params.scanIntervalSeconds),
-    win: String(params.scanWindowSeconds),
     adv: String(params.advIntervalSeconds)
   };
 }
@@ -184,7 +176,6 @@ export function serializeSweepSummaryCsv(bundle: SweepResultBundle): string {
         c.pw,
         c.tau,
         c.scan,
-        c.win,
         c.adv,
         summary.meanCaptureRate,
         summary.stdCaptureRate ?? "",
@@ -247,20 +238,21 @@ export function buildSweepMarkdownReport(options: {
   lines.push("");
   lines.push("### Comparison baseline schedule");
   lines.push(
-    `- Scan ${presetDef.scanIntervalSeconds}s interval / ${presetDef.scanWindowSeconds}s window / ${presetDef.advIntervalSeconds}s advertise / ${presetDef.advertisingBurstDurationSeconds}s burst`
+    `- Scan ${presetDef.scanIntervalSeconds}s interval / ${presetDef.advIntervalSeconds}s advertise interval`
   );
+  lines.push("- Fixed burst assumptions: 3s passive scan burst / 0.5s advertise burst");
   lines.push("");
   lines.push("### Adaptive timing anchors (held)");
   lines.push(
-    `- Low: scan ${anchors.lowIntensity.scanIntervalSeconds}s / window ${anchors.lowIntensity.scanWindowSeconds}s / adv ${anchors.lowIntensity.advIntervalSeconds}s`
+    `- Low: scan ${anchors.lowIntensity.scanIntervalSeconds}s / adv ${anchors.lowIntensity.advIntervalSeconds}s`
   );
   lines.push(
-    `- Neutral: ${anchors.neutral.scanIntervalSeconds}s / ${anchors.neutral.scanWindowSeconds}s / ${anchors.neutral.advIntervalSeconds}s`
+    `- Neutral: scan ${anchors.neutral.scanIntervalSeconds}s / adv ${anchors.neutral.advIntervalSeconds}s`
   );
   lines.push(
-    `- High: ${anchors.highIntensity.scanIntervalSeconds}s / ${anchors.highIntensity.scanWindowSeconds}s / ${anchors.highIntensity.advIntervalSeconds}s`
+    `- High: scan ${anchors.highIntensity.scanIntervalSeconds}s / adv ${anchors.highIntensity.advIntervalSeconds}s`
   );
-  lines.push(`- Burst (anchors): ${anchors.advertisingBurstDurationSeconds}s`);
+  lines.push("- Burst assumptions: scan 3s / advertise 0.5s");
   lines.push(`- Held: τ motion ${SWEEP_HELD_ADAPTIVE.tauMotionSeconds}s, motion gain ${SWEEP_HELD_ADAPTIVE.motionGain}, peer gain ${SWEEP_HELD_ADAPTIVE.peerGain}, peer penalty ${SWEEP_HELD_ADAPTIVE.peerMissPenalty}, downscale ${SWEEP_HELD_ADAPTIVE.allowEnergySavingDownscale}`);
   lines.push("");
 

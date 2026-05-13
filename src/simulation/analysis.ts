@@ -1,4 +1,5 @@
 import { milliampHoursFromMeanMicroAmps } from "./config";
+import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "./bleTimingAssumptions";
 import { pairKey } from "./geometry";
 import type {
   DetectionEvent,
@@ -27,12 +28,12 @@ function matchesJuxta5BenchDiscoveryFixedPolicy(policy: SimulationState["config"
   if (policy.type !== "fixed") {
     return false;
   }
-  const burst = policy.advertisingBurstDurationSeconds ?? 0.5;
+  const burst = policy.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
   return (
     policy.scanIntervalSeconds === 20 &&
     policy.advIntervalSeconds === 1 &&
-    policy.scanWindowSeconds === 1.5 &&
-    Math.abs(burst - 0.5) < 1e-9
+    policy.scanWindowSeconds === FIXED_SCAN_BURST_SECONDS &&
+    Math.abs(burst - FIXED_ADVERTISING_BURST_SECONDS) < 1e-9
   );
 }
 
@@ -41,7 +42,7 @@ function energyModelWarningFor(
   meanEnergyCurrentMicroAmpsPerCollar: number
 ): string | undefined {
   const { energy, activePolicy } = state.config;
-  if (energy.energyModel === "bench_duration") {
+  if (energy.energyModel !== "component") {
     return undefined;
   }
   if (!matchesJuxta5BenchDiscoveryFixedPolicy(activePolicy)) {

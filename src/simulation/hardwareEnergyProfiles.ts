@@ -34,8 +34,8 @@ const defaultWearableEnergy = {
   rxCurrentMa1MPhy: 6.4,
   advertisingEventIntervalSeconds: 0.15,
   advEventChargeMicroCoulombs: 13,
-  /** Wall-time × bench µA; default profile matches Juxta5-8 README production routine mean. */
-  energyModel: "bench_duration" as const,
+  /** Routine-level linear model: mean µA = intercept + scanDutyCoeff×scanDuty + advDutyCoeff×advDuty (duties from realized burst wall time). */
+  energyModel: "bench_routine_linear_v1" as const,
   /**
    * Juxta5-8-nRF prod README: mean current at battery terminals for 1 s adv / 20 s scan routine (467.891 µA).
    * https://github.com/Neurotech-Hub/Juxta5-8-nRF/blob/main/applications/juxta5-8-prod/README.md#measured-current-draw-battery-terminals
@@ -48,9 +48,9 @@ const defaultWearableEnergy = {
   benchScanBurstCurrentMicroAmps: 2893.38,
   /** 500 ms adv burst per 1 s advertise cadence. */
   benchProductionAdvDuty: 0.5,
-  /** Sim scan wall (1.5 s) per 20 s interval — matches `scanWindowSeconds` / `scanIntervalSeconds` for default discovery. */
-  benchProductionScanDuty: 1.5 / 20,
-  /** Simulated schedule achieves ~87% of ideal README wall-time duty; scales active µA so 24 h mean matches bench. */
+  /** Legacy bench_duration calibration duty; routine-linear uses its own coefficients. */
+  benchProductionScanDuty: 3 / 20,
+  /** Legacy bench_duration calibration scale; routine-linear ignores this field. */
   benchWallTimeCalibrationScale: 1.146_28
 };
 
@@ -59,7 +59,7 @@ export const hardwareEnergyProfiles: Record<string, HardwareEnergyProfileDef> = 
     id: "generic-nrf52840",
     label: "Generic nRF52840 BLE wearable",
     description:
-      "Bench-calibrated duration energy (Juxta5-8 README): shelf 8.685 µA, burst currents scaled so the default 1 s adv / 20 s scan / 1.5 s listen schedule matches 467.891 µA mean; +8 dBm fixed.",
+      "Routine-level linear energy (mixed bench fit): intercept + duty-weighted scan/advertise with fixed 3 s scan and 0.5 s advertise burst assumptions; +8 dBm fixed for radio.",
     batteryCapacityMah: 40,
     startingVoltage: 4.2,
     txPowerDbm: 8,

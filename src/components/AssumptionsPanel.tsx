@@ -50,10 +50,9 @@ export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
               metric.
             </li>
             <li>
-              Energy uses a bench-calibrated duration model: each timestep adds shelf draw plus advertise and scan burst
-              wall times multiplied by currents derived from Juxta5-8 README measurements (scaled so the default 1 s
-              advertise / 20 s scan routine matches the measured production mean). Hardware assumes <strong>+8 dBm</strong>{" "}
-              TX for RSSI priors; that gain is not an energy slider in this mode.
+              Energy uses a routine-level linear bench fit: mean current is intercept + scan-duty and advertise-duty terms.
+              Scan and advertise burst durations are fixed simulator assumptions (3 s scan, 0.5 s advertise) used for
+              scheduling/capture, not exposed energy sliders. Hardware assumes <strong>+8 dBm</strong> TX for RSSI priors.
             </li>
             <li>
               Raw BLE detections are behavior- and schedule-dependent observations; they should not be interpreted as

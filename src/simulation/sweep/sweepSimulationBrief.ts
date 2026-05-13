@@ -40,7 +40,12 @@ export function buildSweepSimulationBrief(
       : enc.mode;
 
   const behavior = config.behavior;
-  const energyLabel = "Component (timing + events)";
+  const energyLabel =
+    config.energy.energyModel === "component"
+      ? "Component (timing + events)"
+      : config.energy.energyModel === "bench_duration"
+        ? "Bench duration (burst wall)"
+        : "Routine-linear (duties)";
 
   const baselinePreset = bleBaselinePresetDefForSweep(config);
   const hw =
@@ -73,13 +78,13 @@ export function buildSweepSimulationBrief(
     { label: "Energy", value: `${energyLabel} · ${config.energy.batteryCapacityMah} mAh pack` },
     {
       label: "Comparison BLE baseline",
-      value: `${baselinePreset.label} — scan ${baselinePreset.scanIntervalSeconds}s / win ${baselinePreset.scanWindowSeconds}s / adv ${baselinePreset.advIntervalSeconds}s / burst ${baselinePreset.advertisingBurstDurationSeconds}s`
+      value: `${baselinePreset.label} — scan ${baselinePreset.scanIntervalSeconds}s / adv ${baselinePreset.advIntervalSeconds}s (fixed bursts: scan 3s / adv 0.5s)`
     },
     { label: "Hardware energy profile", value: hw },
     {
       label: "Collar policy",
       value:
-        "Sweep substitutes schedules (comparison baseline row + fixed-rate grid + adaptive grid). The active Simulator policy is not run as-is unless it matches a swept row."
+        "Sweep substitutes schedules (comparison baseline row + fixed-rate grid over scan/advertise intervals + adaptive grid). The active Simulator policy is not run as-is unless it matches a swept row."
     }
   ];
 }

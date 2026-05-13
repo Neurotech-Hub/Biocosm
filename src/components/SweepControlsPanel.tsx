@@ -16,6 +16,7 @@ import {
   SWEEP_REPORT_SEED_POOL,
   type SweepGridVariant
 } from "../simulation/sweep/adaptiveBleSweep";
+import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
 import { buildSweepSimulationBrief } from "../simulation/sweep/sweepSimulationBrief";
 import type { SimulationConfig } from "../simulation/types";
 
@@ -121,6 +122,10 @@ export function SweepControlsPanel({
           <p>
             This sweep tests whether efficient adaptive BLE policies can preserve frequent advertising while downscaling scan
             effort.
+          </p>
+          <p>
+            Fixed-rate grid varies <strong>scan interval</strong> and <strong>advertise interval</strong> only. Scan and
+            advertise burst durations are fixed simulator assumptions shown below.
           </p>
           <p>
             Adaptive grid uses <code>baselineDrive</code> 0.1 and 0.3 (bracketing the 0.5 neutral sampling anchor), with motion
@@ -291,19 +296,18 @@ export function SweepControlsPanel({
             <dd>{formatNumList(execSummary.fixedAxes.advIntervals)}</dd>
           </div>
           <div className="sweep-grid-details-row">
-            <dt>Fixed scan windows (s)</dt>
-            <dd>{formatNumList(execSummary.fixedAxes.scanWindows)}</dd>
+            <dt>Fixed burst assumptions</dt>
+            <dd>
+              scan {FIXED_SCAN_BURST_SECONDS}s · advertise {FIXED_ADVERTISING_BURST_SECONDS}s
+            </dd>
           </div>
           <div className="sweep-grid-details-row sweep-grid-details-row--block">
             <dt>Timing anchors (adaptive)</dt>
             <dd>
               Low {sweepAnchorsDisplay.lowIntensity.scanIntervalSeconds}s scan /{" "}
-              {sweepAnchorsDisplay.lowIntensity.scanWindowSeconds}s window /{" "}
-              {sweepAnchorsDisplay.lowIntensity.advIntervalSeconds}s adv; neutral{" "}
-              {sweepAnchorsDisplay.neutral.scanIntervalSeconds}s / {sweepAnchorsDisplay.neutral.scanWindowSeconds}s /{" "}
-              {sweepAnchorsDisplay.neutral.advIntervalSeconds}s; high {sweepAnchorsDisplay.highIntensity.scanIntervalSeconds}s /{" "}
-              {sweepAnchorsDisplay.highIntensity.scanWindowSeconds}s / {sweepAnchorsDisplay.highIntensity.advIntervalSeconds}s (burst{" "}
-              {sweepAnchorsDisplay.advertisingBurstDurationSeconds}s).
+              {sweepAnchorsDisplay.lowIntensity.advIntervalSeconds}s adv; neutral scan{" "}
+              {sweepAnchorsDisplay.neutral.scanIntervalSeconds}s / adv {sweepAnchorsDisplay.neutral.advIntervalSeconds}s; high scan{" "}
+              {sweepAnchorsDisplay.highIntensity.scanIntervalSeconds}s / adv {sweepAnchorsDisplay.highIntensity.advIntervalSeconds}s.
             </dd>
           </div>
           <div className="sweep-grid-details-row sweep-grid-details-row--block">

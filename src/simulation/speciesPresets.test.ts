@@ -12,9 +12,9 @@ const speciesTestBlePolicy: FixedPolicyConfig = {
   type: "fixed",
   name: "Species test (coarse BLE)",
   scanIntervalSeconds: 60,
-  scanWindowSeconds: 1.5,
+  scanWindowSeconds: 3,
   advIntervalSeconds: 30,
-  advertisingBurstDurationSeconds: 2
+  advertisingBurstDurationSeconds: 0.5
 };
 
 describe("species circadian presets", () => {
