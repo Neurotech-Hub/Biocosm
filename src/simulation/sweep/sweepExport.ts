@@ -1,4 +1,4 @@
-import { bleBaselinePresetDefForSweep, buildAdaptiveAnchorsFromBaseline } from "../blePolicyPresets";
+import { bleBaselinePresetDefForSweep, focusedSweepAdaptiveTimingAnchors } from "../blePolicyPresets";
 import { getHardwareEnergyProfile } from "../hardwareEnergyProfiles";
 import type { SimulationConfig } from "../types";
 import type { CandidatePick, SweepPolicyParams } from "./sweepCandidates";
@@ -203,7 +203,7 @@ export function buildSweepMarkdownReport(options: {
   const { baseConfig, bundle, candidates } = options;
   const lines: string[] = [];
   const presetDef = bleBaselinePresetDefForSweep(baseConfig);
-  const anchors = buildAdaptiveAnchorsFromBaseline(presetDef);
+  const anchors = focusedSweepAdaptiveTimingAnchors();
   const hwLabel =
     getHardwareEnergyProfile(baseConfig.hardwareEnergyProfileId)?.label ?? baseConfig.hardwareEnergyProfileId;
 
@@ -225,34 +225,34 @@ export function buildSweepMarkdownReport(options: {
         : `Report — aggregated across seeds: ${bundle.seedsUsed.join(", ")}`
     }`
   );
-  if (presetDef.id === "general-discovery") {
+  if (presetDef.id === "balanced-adaptive") {
     lines.push(
-      "- Note: The default BLE policy is asymmetric because scan/advertise overlap drives proximity capture. Frequent advertising gives scanning collars more opportunities to detect nearby peers."
+      "- Note: The default BLE baseline targets a small-battery regime (moderate scan/advertise cadence with 2 s advertise bursts). Asymmetric scan/advertise overlap still drives proximity capture."
     );
   }
-  if (presetDef.id === "symmetric-example") {
+  if (presetDef.id === "high-capture") {
     lines.push(
-      "- Warning: The selected baseline is symmetric and may not represent an efficient discovery schedule."
+      "- Note: The high-capture baseline trades energy for discovery; compare mAh/day against your deployment budget."
     );
   }
   lines.push("");
   lines.push("### Comparison baseline schedule");
   lines.push(
-    `- Scan ${presetDef.scanIntervalSeconds}s interval / ${presetDef.advIntervalSeconds}s advertise interval`
+    `- Scan ${presetDef.scanIntervalSeconds}s interval / ${presetDef.scanWindowSeconds}s window / ${presetDef.advIntervalSeconds}s advertise interval`
   );
-  lines.push("- Fixed burst assumptions: 3s passive scan burst / 0.5s advertise burst");
+  lines.push(`- Advertising burst: ${presetDef.advertisingBurstDurationSeconds}s`);
   lines.push("");
-  lines.push("### Adaptive timing anchors (held)");
+  lines.push("### Adaptive timing anchors (sweep + default simulator)");
   lines.push(
-    `- Low: scan ${anchors.lowIntensity.scanIntervalSeconds}s / adv ${anchors.lowIntensity.advIntervalSeconds}s`
+    `- Low: scan ${anchors.lowIntensity.scanIntervalSeconds}s / window ${anchors.lowIntensity.scanWindowSeconds}s / adv ${anchors.lowIntensity.advIntervalSeconds}s`
   );
   lines.push(
-    `- Neutral: scan ${anchors.neutral.scanIntervalSeconds}s / adv ${anchors.neutral.advIntervalSeconds}s`
+    `- Neutral: scan ${anchors.neutral.scanIntervalSeconds}s / window ${anchors.neutral.scanWindowSeconds}s / adv ${anchors.neutral.advIntervalSeconds}s`
   );
   lines.push(
-    `- High: scan ${anchors.highIntensity.scanIntervalSeconds}s / adv ${anchors.highIntensity.advIntervalSeconds}s`
+    `- High: scan ${anchors.highIntensity.scanIntervalSeconds}s / window ${anchors.highIntensity.scanWindowSeconds}s / adv ${anchors.highIntensity.advIntervalSeconds}s`
   );
-  lines.push("- Burst assumptions: scan 3s / advertise 0.5s");
+  lines.push(`- Adaptive sweep advertise burst (anchors): ${anchors.advertisingBurstDurationSeconds}s`);
   lines.push(`- Held: τ motion ${SWEEP_HELD_ADAPTIVE.tauMotionSeconds}s, motion gain ${SWEEP_HELD_ADAPTIVE.motionGain}, peer gain ${SWEEP_HELD_ADAPTIVE.peerGain}, peer penalty ${SWEEP_HELD_ADAPTIVE.peerMissPenalty}, downscale ${SWEEP_HELD_ADAPTIVE.allowEnergySavingDownscale}`);
   lines.push("");
 

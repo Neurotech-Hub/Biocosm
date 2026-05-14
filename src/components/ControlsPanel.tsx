@@ -10,8 +10,8 @@ import {
   motionPeerAdaptiveWithBleBaselineAnchors,
   normalizeBlePolicyPresetId
 } from "../simulation/blePolicyPresets";
-import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
-import { defaultAdaptivePolicy, generalDiscoveryFixedPolicy } from "../simulation/config";
+import { BASELINE_CATALOG_ADVERTISING_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
+import { defaultAdaptivePolicy, defaultBaselineFixedPolicy } from "../simulation/config";
 import {
   applyHardwareProfileToEnergy,
   DEFAULT_HARDWARE_ENERGY_PROFILE_ID,
@@ -22,6 +22,7 @@ import { resolveSpeciesPreset } from "../simulation/speciesModifiers";
 import { SPECIES_PRESETS, speciesPresetOptions } from "../simulation/speciesPresets";
 import type { SpeciesModifierConfig, SpeciesPreset } from "../simulation/speciesTypes";
 import type {
+  AdaptiveBleTiming,
   FixedPolicyConfig,
   MotionPeerAdaptivePolicyConfig,
   SimulationConfig,
@@ -58,24 +59,7 @@ type ControlsPanelProps = {
 function motionPeerAdaptiveWithFixedBursts(
   policy: MotionPeerAdaptivePolicyConfig
 ): MotionPeerAdaptivePolicyConfig {
-  return {
-    ...policy,
-    timingAnchors: {
-      lowIntensity: {
-        ...policy.timingAnchors.lowIntensity,
-        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
-      },
-      neutral: {
-        ...policy.timingAnchors.neutral,
-        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
-      },
-      highIntensity: {
-        ...policy.timingAnchors.highIntensity,
-        scanWindowSeconds: FIXED_SCAN_BURST_SECONDS
-      },
-      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
-    }
-  };
+  return policy;
 }
 
 type BuildProgress = {
@@ -580,19 +564,13 @@ export function ControlsPanel({
                 {p.label}
               </option>
             ))}
-            <option value={BLE_POLICY_CUSTOM_ID}>Custom schedule</option>
           </select>
         </label>
         <p id="ble-baseline-help" className="helper-text">
-          Defines the fixed scan/advertise schedule used as the comparison point and the adaptive policy neutral setting. For
-          proximity logging, frequent advertising with periodic scanning often performs better than symmetric scan/advertise
-          timing. Hardware energy is configured separately below.
+          Three opinionated baselines for a ~5.5 mAh/day regime: <strong>Balanced adaptive</strong> (default),{" "}
+          <strong>Low-power</strong>, and <strong>High-capture</strong>. The fixed schedule is the comparison point and sets
+          adaptive neutral anchors. Hardware energy is configured separately below.
         </p>
-        {config.blePolicyPresetId === "symmetric-example" ? (
-          <p className="helper-text warning-text" role="status">
-            Symmetric BLE schedules are easy to understand but may reduce discovery. Consider comparing against General discovery.
-          </p>
-        ) : null}
 
         <label>
           Adaptive policy
@@ -610,7 +588,7 @@ export function ControlsPanel({
                       )
                     : config.activePolicy.type === "fixed"
                       ? config.activePolicy
-                      : { ...generalDiscoveryFixedPolicy }
+                      : { ...defaultBaselineFixedPolicy }
               });
             }}
           >
@@ -682,8 +660,8 @@ export function ControlsPanel({
             Scan interval: {fixedPolicy.scanIntervalSeconds}s
             <input
               type="range"
-              min="5"
-              max="60"
+              min="15"
+              max="90"
               step="5"
               value={fixedPolicy.scanIntervalSeconds}
               onChange={(event) =>
@@ -701,7 +679,7 @@ export function ControlsPanel({
               type="range"
               min="1"
               max="20"
-              step="1"
+              step="0.25"
               value={fixedPolicy.advIntervalSeconds}
               onChange={(event) =>
                 syncFixedPolicyAndPreset({
@@ -713,9 +691,10 @@ export function ControlsPanel({
           </label>
 
           <p className="helper-text">
-            Burst durations are fixed assumptions: scan {FIXED_SCAN_BURST_SECONDS}s and advertise{" "}
-            {FIXED_ADVERTISING_BURST_SECONDS}s. They affect capture scheduling, but are not exposed as energy tuning
-            controls.
+            This schedule uses a <strong>{fixedPolicy.scanWindowSeconds}</strong> s passive scan window and{" "}
+            <strong>{fixedPolicy.advertisingBurstDurationSeconds}</strong> s advertise bursts (from the catalog baseline).
+            Change the baseline above to switch both; scan and advertise intervals are adjustable here when using fixed-rate
+            BLE.
           </p>
 
           <label className="checkbox-label">
@@ -996,9 +975,9 @@ export function ControlsPanel({
               />
             ) : (
               <p className="helper-text">
-                Neutral stays locked to the BLE policy baseline: {neutralBaseline.scanIntervalSeconds}s scan,{" "}
-                {neutralBaseline.advIntervalSeconds}s advertise. Burst durations stay fixed at scan{" "}
-                {FIXED_SCAN_BURST_SECONDS}s and advertise {FIXED_ADVERTISING_BURST_SECONDS}s.
+                Neutral stays locked to the BLE policy baseline: {neutralBaseline.scanIntervalSeconds}s scan /{" "}
+                {neutralBaseline.scanWindowSeconds}s window / {neutralBaseline.advIntervalSeconds}s advertise, with{" "}
+                {neutralBaseline.advertisingBurstDurationSeconds}s advertise bursts.
               </p>
             )}
           </details>
@@ -1021,9 +1000,8 @@ export function ControlsPanel({
               <p className="helper-text">
                 Routine-level linear model (bench fit): mean current µA = intercept + scan-duty coefficient × (realized
                 scan burst wall seconds / epoch) + advertise-duty coefficient × (realized advertise burst wall seconds /
-                epoch). Duties use fixed burst assumptions (scan {FIXED_SCAN_BURST_SECONDS}s, advertise{" "}
-                {FIXED_ADVERTISING_BURST_SECONDS}s) plus scheduler effects such as clipping and safe zones. Not packet-level
-                physics. Radio prior is <strong>+8 dBm</strong> (fixed).
+                epoch). Duties use realized scan and advertise burst wall times from the active policy (plus clipping and safe
+                zones). Not packet-level physics. Radio prior is <strong>+8 dBm</strong> (fixed).
               </p>
             ) : null}
             <p className="helper-text">
@@ -1247,6 +1225,17 @@ function TimingAnchorControls({
           />
         </label>
         <label>
+          Scan window
+          <input
+            type="number"
+            min="0.05"
+            max="30"
+            step="0.05"
+            value={timing.scanWindowSeconds}
+            onChange={(event) => updateTiming("scanWindowSeconds", Number(event.target.value))}
+          />
+        </label>
+        <label>
           Adv interval
           <input
             type="number"
@@ -1258,8 +1247,8 @@ function TimingAnchorControls({
         </label>
       </div>
       <p className="helper-text">
-        Scan burst is fixed at {FIXED_SCAN_BURST_SECONDS}s; advertise burst is fixed at{" "}
-        {FIXED_ADVERTISING_BURST_SECONDS}s.
+        Adaptive sweep uses {policy.timingAnchors.advertisingBurstDurationSeconds}s advertise bursts at anchors. This anchor
+        scan window is {timing.scanWindowSeconds}s (capped to the anchor scan interval when applied).
       </p>
     </div>
   );
@@ -1267,8 +1256,8 @@ function TimingAnchorControls({
 
 function adaptiveRangePresetId(policy: MotionPeerAdaptivePolicyConfig): string {
   const match = Object.entries(adaptiveRangePresets).find(([, preset]) =>
-    timingMatches(policy.timingAnchors.lowIntensity, preset.lowIntensity) &&
-    timingMatches(policy.timingAnchors.highIntensity, preset.highIntensity)
+    anchorCellMatch(policy.timingAnchors.lowIntensity, preset.lowIntensity) &&
+    anchorCellMatch(policy.timingAnchors.highIntensity, preset.highIntensity)
   );
   return match?.[0] ?? "custom";
 }
@@ -1282,6 +1271,7 @@ function applyAdaptiveRangePreset(policy: MotionPeerAdaptivePolicyConfig, preset
     ...policy,
     timingAnchors: {
       ...policy.timingAnchors,
+      advertisingBurstDurationSeconds: BASELINE_CATALOG_ADVERTISING_BURST_SECONDS,
       lowIntensity: preset.lowIntensity,
       highIntensity: preset.highIntensity
     }
@@ -1330,12 +1320,15 @@ function applyPeerInfluencePreset(policy: MotionPeerAdaptivePolicyConfig, preset
   return preset ? { ...policy, ...preset } : policy;
 }
 
-function timingMatches(
-  a: MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"],
-  b: MotionPeerAdaptivePolicyConfig["timingAnchors"]["neutral"]
+function anchorCellMatch(
+  a: AdaptiveBleTiming,
+  b: AdaptiveBleTiming
 ): boolean {
-  return nearlyEqual(a.scanIntervalSeconds, b.scanIntervalSeconds) &&
-    nearlyEqual(a.advIntervalSeconds, b.advIntervalSeconds);
+  return (
+    nearlyEqual(a.scanIntervalSeconds, b.scanIntervalSeconds) &&
+    nearlyEqual(a.scanWindowSeconds, b.scanWindowSeconds) &&
+    nearlyEqual(a.advIntervalSeconds, b.advIntervalSeconds)
+  );
 }
 
 function nearlyEqual(a: number, b: number): boolean {
@@ -1344,16 +1337,16 @@ function nearlyEqual(a: number, b: number): boolean {
 
 const adaptiveRangePresets = {
   conservative: {
-    lowIntensity: { scanIntervalSeconds: 40, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 10 },
-    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 2 }
+    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: 0.35, advIntervalSeconds: 10 },
+    highIntensity: { scanIntervalSeconds: 20, scanWindowSeconds: 0.5, advIntervalSeconds: 5 }
   },
   balanced: {
-    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 20 },
-    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 1 }
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 0.4, advIntervalSeconds: 9 },
+    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 0.65, advIntervalSeconds: 5.5 }
   },
   aggressive: {
-    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 30 },
-    highIntensity: { scanIntervalSeconds: 2, scanWindowSeconds: FIXED_SCAN_BURST_SECONDS, advIntervalSeconds: 0.5 }
+    lowIntensity: { scanIntervalSeconds: 120, scanWindowSeconds: 0.35, advIntervalSeconds: 15 },
+    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: 0.75, advIntervalSeconds: 2 }
   }
 } as const;
 
@@ -1365,13 +1358,13 @@ const adaptiveBaselinePresets = {
 
 const motionInfluencePresets = {
   low: { motionGain: 0.2, motionWeight: 0.3, tauMotionSeconds: 120 },
-  medium: { motionGain: 0.35, motionWeight: 0.45, tauMotionSeconds: 180 },
+  medium: { motionGain: 0.35, motionWeight: 0.2, tauMotionSeconds: 180 },
   high: { motionGain: 0.55, motionWeight: 0.65, tauMotionSeconds: 300 }
 } as const;
 
 const peerInfluencePresets = {
   low: { peerGain: 0.25, peerWeight: 0.35, tauPeerSeconds: 600, peerMissPenalty: 0.1 },
-  medium: { peerGain: 0.45, peerWeight: 0.55, tauPeerSeconds: 900, peerMissPenalty: 0.2 },
+  medium: { peerGain: 0.45, peerWeight: 0.5, tauPeerSeconds: 200, peerMissPenalty: 0.2 },
   high: { peerGain: 0.65, peerWeight: 0.75, tauPeerSeconds: 1800, peerMissPenalty: 0.3 }
 } as const;
 

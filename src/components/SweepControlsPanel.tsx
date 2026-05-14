@@ -2,8 +2,7 @@ import { useMemo } from "react";
 import { InfoPopover } from "./InfoPopover";
 import {
   baselineFixedPolicyForSweep,
-  bleBaselinePresetDefForSweep,
-  buildAdaptiveAnchorsFromBaseline
+  focusedSweepAdaptiveTimingAnchors
 } from "../simulation/blePolicyPresets";
 import {
   adaptiveSweepPolicyCount,
@@ -16,7 +15,7 @@ import {
   SWEEP_REPORT_SEED_POOL,
   type SweepGridVariant
 } from "../simulation/sweep/adaptiveBleSweep";
-import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
+import { FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
 import { buildSweepSimulationBrief } from "../simulation/sweep/sweepSimulationBrief";
 import type { SimulationConfig } from "../simulation/types";
 
@@ -59,10 +58,7 @@ export function SweepControlsPanel({
     sweepProgress.total > 0 ? Math.round((100 * sweepProgress.completed) / sweepProgress.total) : 0;
 
   const baselineFixed = useMemo(() => baselineFixedPolicyForSweep(builtSimulation), [builtSimulation]);
-  const sweepAnchorsDisplay = useMemo(
-    () => buildAdaptiveAnchorsFromBaseline(bleBaselinePresetDefForSweep(builtSimulation)),
-    [builtSimulation]
-  );
+  const sweepAnchorsDisplay = useMemo(() => focusedSweepAdaptiveTimingAnchors(), []);
 
   const simulationBrief = useMemo(
     () =>
@@ -110,9 +106,9 @@ export function SweepControlsPanel({
         <h2>Sweep settings</h2>
         <InfoPopover label="Sweep details and grid size" title="About this sweep">
           <p>
-            Smoke test, interactive, and full all use the <strong>same compact grid</strong> today ({quickPoliciesPerSeed}{" "}
-            policies per seed with this baseline, including the comparison baseline schedule plus inactive scan ×3 and ×5
-            variants). The dropdown is kept for workflow labels; denser grids may return later.
+            Smoke test, interactive, and full all use the <strong>same focused grid</strong> today ({quickPoliciesPerSeed}{" "}
+            policies per seed: comparison baseline nominal + inactive scan ×3/×5, each factorial cell the same way, plus 54
+            adaptive runs). The dropdown is kept for workflow labels.
           </p>
           <p>
             Each run is <strong>fixed-rate schedules + adaptive policies</strong> per seed, anchored to your comparison BLE
@@ -124,12 +120,15 @@ export function SweepControlsPanel({
             effort.
           </p>
           <p>
-            Fixed-rate grid varies <strong>scan interval</strong> and <strong>advertise interval</strong> only. Scan and
-            advertise burst durations are fixed simulator assumptions shown below.
+            Fixed-rate grid varies <strong>scan interval</strong>, <strong>advertise interval</strong>, and{" "}
+            <strong>scan window</strong> (5×3×3 = 45 cells). Each distinct schedule runs as nominal fixed, then inactive scan ×3
+            and ×5 (bout-delayed stretch). Advertise burst is <strong>{FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS}s</strong> on
+            the sweep grid; one factorial cell may duplicate the comparison baseline and is skipped.
           </p>
           <p>
-            Adaptive grid uses <code>baselineDrive</code> 0.1 and 0.3 (bracketing the 0.5 neutral sampling anchor), with motion
-            and peer weights at 0.2 / 0.5 and τ_peer 200 s / 600 s.
+            Adaptive grid: <code>baselineDrive</code> {formatNumList(execSummary.adaptiveAxes.baselineDrives)}, motionWeight{" "}
+            {formatNumList(execSummary.adaptiveAxes.motionWeights)}, peerWeight {formatNumList(execSummary.adaptiveAxes.peerWeights)}, τ_peer{" "}
+            {formatNumList(execSummary.adaptiveAxes.tauPeerSeconds)} s (3×3×3×2 = 54 policies per seed).
           </p>
           <p>
             Aggregate mode draws world seeds from a fixed pool ({SWEEP_REPORT_SEED_POOL.join(", ")}). Choose how many seeds to
@@ -144,11 +143,6 @@ export function SweepControlsPanel({
           <p className="helper-text warning-text sweep-sim-brief-stale">
             Simulation controls changed after the last build — rebuild on the Simulator tab to include those edits in the
             next sweep.
-          </p>
-        ) : null}
-        {builtSimulation.blePolicyPresetId === "symmetric-example" ? (
-          <p className="helper-text warning-text" role="status">
-            Symmetric BLE schedules are easy to understand but may reduce discovery. Consider comparing against General discovery.
           </p>
         ) : null}
         <dl className="sweep-sim-brief-list">
@@ -296,18 +290,21 @@ export function SweepControlsPanel({
             <dd>{formatNumList(execSummary.fixedAxes.advIntervals)}</dd>
           </div>
           <div className="sweep-grid-details-row">
-            <dt>Fixed burst assumptions</dt>
-            <dd>
-              scan {FIXED_SCAN_BURST_SECONDS}s · advertise {FIXED_ADVERTISING_BURST_SECONDS}s
-            </dd>
+            <dt>Fixed scan windows (s)</dt>
+            <dd>{formatNumList(execSummary.fixedAxes.scanWindowSecondsList)}</dd>
+          </div>
+          <div className="sweep-grid-details-row">
+            <dt>Fixed advertise burst (sweep grid)</dt>
+            <dd>{FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS}s</dd>
           </div>
           <div className="sweep-grid-details-row sweep-grid-details-row--block">
             <dt>Timing anchors (adaptive)</dt>
             <dd>
-              Low {sweepAnchorsDisplay.lowIntensity.scanIntervalSeconds}s scan /{" "}
-              {sweepAnchorsDisplay.lowIntensity.advIntervalSeconds}s adv; neutral scan{" "}
-              {sweepAnchorsDisplay.neutral.scanIntervalSeconds}s / adv {sweepAnchorsDisplay.neutral.advIntervalSeconds}s; high scan{" "}
-              {sweepAnchorsDisplay.highIntensity.scanIntervalSeconds}s / adv {sweepAnchorsDisplay.highIntensity.advIntervalSeconds}s.
+              Low {sweepAnchorsDisplay.lowIntensity.scanIntervalSeconds}s scan / {sweepAnchorsDisplay.lowIntensity.scanWindowSeconds}s win /{" "}
+              {sweepAnchorsDisplay.lowIntensity.advIntervalSeconds}s adv; neutral {sweepAnchorsDisplay.neutral.scanIntervalSeconds}s scan /{" "}
+              {sweepAnchorsDisplay.neutral.scanWindowSeconds}s win / {sweepAnchorsDisplay.neutral.advIntervalSeconds}s adv; high{" "}
+              {sweepAnchorsDisplay.highIntensity.scanIntervalSeconds}s scan / {sweepAnchorsDisplay.highIntensity.scanWindowSeconds}s win /{" "}
+              {sweepAnchorsDisplay.highIntensity.advIntervalSeconds}s adv (burst {sweepAnchorsDisplay.advertisingBurstDurationSeconds}s).
             </dd>
           </div>
           <div className="sweep-grid-details-row sweep-grid-details-row--block">

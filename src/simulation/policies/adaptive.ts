@@ -1,5 +1,4 @@
 import { applyFixedRatePolicy } from "./fixedRate";
-import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../bleTimingAssumptions";
 import type {
   AdaptiveBleTiming,
   AdaptiveBleTimingAnchors,
@@ -110,23 +109,24 @@ export function mapAdaptiveTiming(
   anchors: AdaptiveBleTimingAnchors
 ): AdaptiveBleTiming & { advertisingBurstDurationSeconds: number } {
   const clamped = clamp01(drive);
+  const burst = anchors.advertisingBurstDurationSeconds;
 
   if (clamped <= 0.5) {
     const p = clamped / 0.5;
     return {
       scanIntervalSeconds: logInterpolate(anchors.lowIntensity.scanIntervalSeconds, anchors.neutral.scanIntervalSeconds, p),
-      scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
+      scanWindowSeconds: linearInterpolate(anchors.lowIntensity.scanWindowSeconds, anchors.neutral.scanWindowSeconds, p),
       advIntervalSeconds: logInterpolate(anchors.lowIntensity.advIntervalSeconds, anchors.neutral.advIntervalSeconds, p),
-      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+      advertisingBurstDurationSeconds: burst
     };
   }
 
   const p = (clamped - 0.5) / 0.5;
   return {
     scanIntervalSeconds: logInterpolate(anchors.neutral.scanIntervalSeconds, anchors.highIntensity.scanIntervalSeconds, p),
-    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
+    scanWindowSeconds: linearInterpolate(anchors.neutral.scanWindowSeconds, anchors.highIntensity.scanWindowSeconds, p),
     advIntervalSeconds: logInterpolate(anchors.neutral.advIntervalSeconds, anchors.highIntensity.advIntervalSeconds, p),
-    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+    advertisingBurstDurationSeconds: burst
   };
 }
 
@@ -135,8 +135,8 @@ export function constrainAdaptiveTiming<T extends AdaptiveBleTiming & { advertis
 ): T {
   const scanIntervalSeconds = Math.max(1, timing.scanIntervalSeconds);
   const advIntervalSeconds = Math.max(0.2, timing.advIntervalSeconds);
-  const scanWindowSeconds = Math.min(scanIntervalSeconds, FIXED_SCAN_BURST_SECONDS);
-  const advertisingBurstDurationSeconds = FIXED_ADVERTISING_BURST_SECONDS;
+  const scanWindowSeconds = Math.min(scanIntervalSeconds, Math.max(0, timing.scanWindowSeconds));
+  const advertisingBurstDurationSeconds = Math.max(0.05, timing.advertisingBurstDurationSeconds);
 
   return {
     ...timing,

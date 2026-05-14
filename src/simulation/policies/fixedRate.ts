@@ -27,6 +27,10 @@ export function applyFixedRatePolicy(
     !isInactiveScanMultiplierInf(policy.inactiveScanIntervalMultiplier) &&
     animal.collar.noMotionStreakSeconds >= boutSeconds;
   const numericMult = typeof mult === "number" ? mult : 2;
+  const scanIntervalSeconds = stretchInactiveScan ? policy.scanIntervalSeconds * numericMult : policy.scanIntervalSeconds;
+  const nominalWindow = policy.scanWindowSeconds ?? FIXED_SCAN_BURST_SECONDS;
+  const scanWindowSeconds = infInactiveScan ? 0 : Math.min(nominalWindow, scanIntervalSeconds);
+  const advBurst = policy.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
 
   return {
     ...animal,
@@ -34,10 +38,10 @@ export function applyFixedRatePolicy(
       ...animal.collar,
       scanActive: false,
       advActive: false,
-      scanIntervalSeconds: stretchInactiveScan ? policy.scanIntervalSeconds * numericMult : policy.scanIntervalSeconds,
-      scanWindowSeconds: infInactiveScan ? 0 : FIXED_SCAN_BURST_SECONDS,
+      scanIntervalSeconds,
+      scanWindowSeconds,
       advIntervalSeconds: policy.advIntervalSeconds,
-      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+      advertisingBurstDurationSeconds: advBurst
     }
   };
 }
@@ -68,19 +72,23 @@ export function getPolicyTiming(policy: FirmwarePolicyConfig): {
   advertisingBurstDurationSeconds: number;
 } {
   if (policy.type === "fixed") {
+    const sw = policy.scanWindowSeconds ?? FIXED_SCAN_BURST_SECONDS;
     return {
       scanIntervalSeconds: policy.scanIntervalSeconds,
-      scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
+      scanWindowSeconds: Math.min(sw, policy.scanIntervalSeconds),
       advIntervalSeconds: policy.advIntervalSeconds,
-      advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+      advertisingBurstDurationSeconds: policy.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS
     };
   }
 
   return {
     scanIntervalSeconds: policy.timingAnchors.neutral.scanIntervalSeconds,
-    scanWindowSeconds: FIXED_SCAN_BURST_SECONDS,
+    scanWindowSeconds: Math.min(
+      policy.timingAnchors.neutral.scanWindowSeconds,
+      policy.timingAnchors.neutral.scanIntervalSeconds
+    ),
     advIntervalSeconds: policy.timingAnchors.neutral.advIntervalSeconds,
-    advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
+    advertisingBurstDurationSeconds: policy.timingAnchors.advertisingBurstDurationSeconds
   };
 }
 

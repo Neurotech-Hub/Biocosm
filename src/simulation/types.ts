@@ -292,7 +292,7 @@ export type SimulationConfig = {
   speciesPresetId: string;
   speciesModifiers: SpeciesModifierConfig;
   advancedSpeciesOverrides?: AdvancedSpeciesOverrides;
-  /** Catalog id for comparison BLE baseline schedules (`general-discovery`, `symmetric-example`, `juxta-v56-social`, or `custom`). */
+  /** Catalog id for comparison BLE baseline (`balanced-adaptive`, `low-power`, `high-capture`, or legacy ids normalized on load). */
   blePolicyPresetId: string;
   /** Hardware energy profile id (only `generic-nrf52840`; legacy `juxta-v56` normalizes on load). */
   hardwareEnergyProfileId: string;

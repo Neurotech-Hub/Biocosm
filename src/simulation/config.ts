@@ -29,13 +29,16 @@ export const juxtaMainCMode0FixedPolicy: FixedPolicyConfig = {
   advertisingBurstDurationSeconds: FIXED_ADVERTISING_BURST_SECONDS
 };
 
-const generalDiscoveryPreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
+const defaultBleBaselinePreset = blePolicyPresets[DEFAULT_BLE_POLICY_PRESET_ID]!;
 
-/** Default fixed policy: General discovery (asymmetric proximity baseline). */
-export const generalDiscoveryFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(generalDiscoveryPreset);
+/** Default fixed policy (matches `DEFAULT_BLE_POLICY_PRESET_ID`, currently balanced adaptive baseline). */
+export const defaultBaselineFixedPolicy: FixedPolicyConfig = fixedPolicyFromPreset(defaultBleBaselinePreset);
+
+/** @deprecated Use `defaultBaselineFixedPolicy`. */
+export const generalDiscoveryFixedPolicy: FixedPolicyConfig = defaultBaselineFixedPolicy;
 
 /**
- * Optional fixed row (e.g. after a sweep): faster scan/adv than catalog general-discovery, with bout-delayed inactive scan ×2.
+ * Optional fixed row (e.g. after a sweep): faster scan/adv than default baseline, with bout-delayed inactive scan ×2.
  */
 export const sweepStyleFixedProximityDdPolicy: FixedPolicyConfig = {
   type: "fixed",
@@ -49,7 +52,7 @@ export const sweepStyleFixedProximityDdPolicy: FixedPolicyConfig = {
   inactiveScanIntervalMultiplier: 2
 };
 
-const defaultAdaptiveAnchors = buildAdaptiveAnchorsFromBaseline(generalDiscoveryPreset);
+const defaultAdaptiveAnchors = buildAdaptiveAnchorsFromBaseline(defaultBleBaselinePreset);
 
 export const defaultAdaptivePolicy = {
   id: "motion-peer-adaptive",
@@ -58,12 +61,12 @@ export const defaultAdaptivePolicy = {
   timingAnchors: defaultAdaptiveAnchors,
   baselineDrive: 0.25,
   tauMotionSeconds: 180,
-  tauPeerSeconds: 900,
+  tauPeerSeconds: 200,
   motionGain: 0.35,
   peerGain: 0.45,
   peerMissPenalty: 0.2,
-  motionWeight: 0.45,
-  peerWeight: 0.55,
+  motionWeight: 0.2,
+  peerWeight: 0.5,
   peerDetectionCountSaturation: 1,
   motionEventCountSaturation: 1,
   allowEnergySavingDownscale: true
@@ -118,8 +121,8 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  /** Matches `blePolicyPresetId` general-discovery (20 s scan / 1.5 s win / 1 s adv / 500 ms burst). */
-  activePolicy: { ...generalDiscoveryFixedPolicy }
+  /** Matches `blePolicyPresetId` default baseline (balanced adaptive: 30 s scan / 0.5 s window / 7.5 s adv / 2 s burst). */
+  activePolicy: { ...defaultBaselineFixedPolicy }
 };
 
 /**

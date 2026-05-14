@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { blePolicyPresets, fixedPolicyFromPreset, sweepBaselinePolicyId } from "./blePolicyPresets";
-import { defaultAdaptivePolicy, defaultSimulationConfig } from "./config";
+import { sweepBaselinePolicyId } from "./blePolicyPresets";
+import { defaultAdaptivePolicy, defaultSimulationConfig, juxtaMainCMode0FixedPolicy } from "./config";
 import { applyHardwareProfileToEnergy } from "./hardwareEnergyProfiles";
 import { mapAdaptiveTiming } from "./policies/adaptive";
 import { buildSweepTrials } from "./sweep/adaptiveBleSweep";
@@ -15,17 +15,17 @@ describe("BLE baseline vs hardware energy separation", () => {
     expect(cfg.energy.baselineCurrentMicroAmps).toBe(8.685);
   });
 
-  it("neutral adaptive timing uses general-discovery anchors from default config", () => {
+  it("neutral adaptive timing uses default focused anchors from default config", () => {
     const neutral = mapAdaptiveTiming(0.5, defaultAdaptivePolicy.timingAnchors);
-    expect(neutral.scanIntervalSeconds).toBeCloseTo(20);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(3);
-    expect(neutral.advIntervalSeconds).toBeCloseTo(5);
+    expect(neutral.scanIntervalSeconds).toBeCloseTo(30);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
+    expect(neutral.advIntervalSeconds).toBeCloseTo(7.5);
   });
 
-  it("low-intensity anchor backs off scan while advertising is less frequent than neutral (60s scan / 10s adv)", () => {
+  it("low-intensity anchor matches focused sweep low anchor (90s scan / 0.35s win / 10s adv)", () => {
     const low = mapAdaptiveTiming(0, defaultAdaptivePolicy.timingAnchors);
-    expect(low.scanIntervalSeconds).toBeCloseTo(60);
-    expect(low.scanWindowSeconds).toBeCloseTo(3);
+    expect(low.scanIntervalSeconds).toBeCloseTo(90);
+    expect(low.scanWindowSeconds).toBeCloseTo(0.35);
     expect(low.advIntervalSeconds).toBeCloseTo(10);
   });
   it("sweep includes baseline_fixed row for selected BLE preset id", () => {
@@ -37,8 +37,8 @@ describe("BLE baseline vs hardware energy separation", () => {
     expect(trials.some((t) => t.policyId === expectedId && t.kind === "baseline_fixed")).toBe(true);
   });
 
-  it("Juxta social preset reproduces specified scan/adv/window/burst", () => {
-    const fixed = fixedPolicyFromPreset(blePolicyPresets["juxta-v56-social"]!);
+  it("Juxta main.c mode0 fixed policy reproduces specified scan/adv/window/burst", () => {
+    const fixed = juxtaMainCMode0FixedPolicy;
     expect(fixed.scanIntervalSeconds).toBe(20);
     expect(fixed.scanWindowSeconds).toBe(3);
     expect(fixed.advIntervalSeconds).toBe(1);

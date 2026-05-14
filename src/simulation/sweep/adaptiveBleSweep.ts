@@ -1,14 +1,13 @@
 import {
   baselineFixedPolicyForSweep,
-  bleBaselinePresetDefForSweep,
   blePolicyPresetIdForFixedPolicy,
   BLE_POLICY_CUSTOM_ID,
-  buildAdaptiveAnchorsFromBaseline,
+  focusedSweepAdaptiveTimingAnchors,
   getBlePolicyPreset,
   sweepBaselinePolicyId
 } from "../blePolicyPresets";
 import { computeMetrics } from "../analysis";
-import { FIXED_ADVERTISING_BURST_SECONDS, FIXED_SCAN_BURST_SECONDS } from "../bleTimingAssumptions";
+import { FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS } from "../bleTimingAssumptions";
 import { defaultSimulationConfig } from "../config";
 import { mergeLogs, runSimulationToEnd, stepSimulation } from "../engine";
 import type {
@@ -47,12 +46,13 @@ export const SWEEP_HELD_ADAPTIVE = {
 } as const;
 
 /**
- * Single compact sweep grid (2×2×2×2 = **16** adaptive policies per seed). `minimal` / `quick` / `full` all use this grid for now.
+ * Focused sweep adaptive grid: 3×3×3×2 = **54** policies per seed
+ * ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §9).
  */
-export const SWEEP_BASELINE_DRIVES = [0.1, 0.3] as const;
-export const SWEEP_MOTION_WEIGHTS = [0.2, 0.5] as const;
-export const SWEEP_PEER_WEIGHTS = [0.2, 0.5] as const;
-export const SWEEP_TAU_PEER_SECONDS = [200, 600] as const;
+export const SWEEP_BASELINE_DRIVES = [0.15, 0.25, 0.35] as const;
+export const SWEEP_MOTION_WEIGHTS = [0.1, 0.2, 0.3] as const;
+export const SWEEP_PEER_WEIGHTS = [0.4, 0.5, 0.6] as const;
+export const SWEEP_TAU_PEER_SECONDS = [120, 200] as const;
 
 export const SWEEP_FULL_BASELINE_DRIVES = SWEEP_BASELINE_DRIVES;
 export const SWEEP_FULL_MOTION_WEIGHTS = SWEEP_MOTION_WEIGHTS;
@@ -69,11 +69,12 @@ export const SWEEP_MINIMAL_MOTION_WEIGHTS = SWEEP_MOTION_WEIGHTS;
 export const SWEEP_MINIMAL_PEER_WEIGHTS = SWEEP_PEER_WEIGHTS;
 export const SWEEP_MINIMAL_TAU_PEER_SECONDS = SWEEP_TAU_PEER_SECONDS;
 
-/** Fixed-rate sweep uses firmware timing assumptions; only scan/advertise intervals are swept. */
-export const SWEEP_FIXED_ADVERTISING_BURST_SECONDS = FIXED_ADVERTISING_BURST_SECONDS;
+/** Fixed-rate sweep uses 2 s advertising bursts on the focused grid ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §6). */
+export const SWEEP_FIXED_ADVERTISING_BURST_SECONDS = FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS;
 
-const SWEEP_FIXED_SCAN_INTERVALS = [10, 20, 30, 60, 120] as const;
-const SWEEP_FIXED_ADV_INTERVALS = [1, 2, 5, 10, 20] as const;
+const SWEEP_FIXED_SCAN_INTERVALS = [20, 30, 45, 60, 90] as const;
+const SWEEP_FIXED_ADV_INTERVALS = [5, 7.5, 10] as const;
+const SWEEP_FIXED_SCAN_WINDOW_SECONDS = [0.35, 0.5, 0.75] as const;
 
 type InactiveStretchVariantDef = {
   mult: number;
@@ -100,7 +101,7 @@ function sweepInactiveStretchVariants(_variant: SweepGridVariant): readonly Inac
   ] as const;
 }
 
-/** Rows per fixed (scan interval, advertise interval) combo: baseline + inactive stretch variants. */
+/** Rows per fixed (scan, adv, window) combo: nominal + inactive scan ×3 + ×5. */
 export function fixedSweepRowsPerCombo(variant: SweepGridVariant): number {
   return 1 + sweepInactiveStretchVariants(variant).length;
 }
@@ -131,8 +132,7 @@ type SweepAxes = {
 export type FixedSweepAxes = {
   scanIntervals: readonly number[];
   advIntervals: readonly number[];
-  /** Scan window is not swept; fixed policies use the simulator's fixed scan-burst assumption (seconds). */
-  heldScanWindowSeconds: number;
+  scanWindowSecondsList: readonly number[];
 };
 
 function roundIntervalSeconds(v: number): number {
@@ -146,16 +146,17 @@ function uniqueSorted(values: number[]): number[] {
   return [...new Set(values.filter((x) => Number.isFinite(x)))].sort((a, b) => a - b);
 }
 
-/** Fixed-rate Cartesian axes: scan and advertise intervals only; scan window follows the baseline preset. */
+/** Fixed-rate Cartesian axes ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §6). */
 export function getFixedSweepAxes(variant: SweepGridVariant | undefined, baseline: FixedPolicyConfig): FixedSweepAxes {
   void variant;
   void baseline;
   const scanSrc: number[] = [...SWEEP_FIXED_SCAN_INTERVALS];
   const advSrc: number[] = [...SWEEP_FIXED_ADV_INTERVALS];
+  const winSrc: number[] = [...SWEEP_FIXED_SCAN_WINDOW_SECONDS];
   return {
     scanIntervals: uniqueSorted(scanSrc.map(roundIntervalSeconds)),
     advIntervals: uniqueSorted(advSrc.map(roundIntervalSeconds)),
-    heldScanWindowSeconds: FIXED_SCAN_BURST_SECONDS
+    scanWindowSecondsList: uniqueSorted(winSrc.map((w) => Math.round(w * 1000) / 1000))
   };
 }
 
@@ -169,7 +170,7 @@ export function getSweepAxes(variant?: SweepGridVariant): SweepAxes {
   };
 }
 
-/** Number of adaptive policies in the active grid (16 for every variant today). */
+/** Number of adaptive policies in the active grid (54). */
 export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   const axes = getSweepAxes(variant);
   return (
@@ -180,7 +181,23 @@ export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   );
 }
 
-/** Number of fixed-rate policies per seed: comparison baseline block (with inactive variants) plus grid combos that are not an exact duplicate of baseline. */
+function fixedGridCellMatchesBaseline(
+  scanIntervalSeconds: number,
+  advIntervalSeconds: number,
+  scanWindowSeconds: number,
+  burstSeconds: number,
+  baseline: FixedPolicyConfig
+): boolean {
+  const bb = baseline.advertisingBurstDurationSeconds ?? SWEEP_FIXED_ADVERTISING_BURST_SECONDS;
+  return (
+    scanIntervalSeconds === baseline.scanIntervalSeconds &&
+    advIntervalSeconds === baseline.advIntervalSeconds &&
+    Math.abs(scanWindowSeconds - baseline.scanWindowSeconds) < 1e-5 &&
+    Math.abs(burstSeconds - bb) < 1e-5
+  );
+}
+
+/** Number of fixed-rate policies per seed: (baseline + inactive variants) + same for each factorial cell not matching baseline. */
 export function fixedSweepPolicyCount(variant?: SweepGridVariant, baseline?: FixedPolicyConfig): number {
   const b = baseline ?? baselineFixedPolicyForSweep(defaultSimulationConfig);
   const v = resolveGridVariant(variant);
@@ -189,12 +206,14 @@ export function fixedSweepPolicyCount(variant?: SweepGridVariant, baseline?: Fix
   let baselineMatchingCells = 0;
   for (const scanIntervalSeconds of ax.scanIntervals) {
     for (const advIntervalSeconds of ax.advIntervals) {
-      if (schedulesMatchSweepBaseline(scanIntervalSeconds, advIntervalSeconds, b)) {
-        baselineMatchingCells += 1;
+      for (const scanWindowSeconds of ax.scanWindowSecondsList) {
+        if (fixedGridCellMatchesBaseline(scanIntervalSeconds, advIntervalSeconds, scanWindowSeconds, SWEEP_FIXED_ADVERTISING_BURST_SECONDS, b)) {
+          baselineMatchingCells += 1;
+        }
       }
     }
   }
-  const totalCells = ax.scanIntervals.length * ax.advIntervals.length;
+  const totalCells = ax.scanIntervals.length * ax.advIntervals.length * ax.scanWindowSecondsList.length;
   const nonMatchingCells = totalCells - baselineMatchingCells;
   return perCombo * (1 + nonMatchingCells);
 }
@@ -219,7 +238,7 @@ export type BuildSweepTrialsOptions = {
   gridVariant?: SweepGridVariant;
   /** Report mode only; default 3 (101, 202, 303). */
   reportSeedCount?: number;
-  /** Drives baseline-relative fixed grid and adaptive anchors (defaults to General discovery). */
+  /** Drives baseline-relative fixed grid (adaptive sweep anchors are fixed to the focused set). */
   simulationConfig?: SimulationConfig;
 };
 
@@ -342,15 +361,7 @@ export function buildSweepGridPolicies(
   return policies;
 }
 
-function schedulesMatchSweepBaseline(
-  scanIntervalSeconds: number,
-  advIntervalSeconds: number,
-  baseline: FixedPolicyConfig
-): boolean {
-  return scanIntervalSeconds === baseline.scanIntervalSeconds && advIntervalSeconds === baseline.advIntervalSeconds;
-}
-
-/** One entry per fixed-rate combo; baseline schedule is always swept first, then Cartesian grid (skipping an exact duplicate of baseline). */
+/** Comparison baseline row, then full scan/adv/window factorial minus an exact duplicate of baseline ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md]). */
 export function buildFixedSweepTrialDefs(
   variant: SweepGridVariant | undefined,
   simulationConfig: SimulationConfig
@@ -395,27 +406,31 @@ export function buildFixedSweepTrialDefs(
     ...baselineFixed,
     id: baselinePolicyId,
     name: `Baseline: ${presetLabel}`,
-    advertisingBurstDurationSeconds: burstSeconds
+    advertisingBurstDurationSeconds: burstSeconds,
+    scanWindowSeconds: Math.min(baselineFixed.scanWindowSeconds, baselineFixed.scanIntervalSeconds)
   };
   pushFixedSweepCombo(baselinePolicyId, "baseline_fixed", baselinePolicy);
 
   for (const scanIntervalSeconds of axes.scanIntervals) {
     for (const advIntervalSeconds of axes.advIntervals) {
-      if (schedulesMatchSweepBaseline(scanIntervalSeconds, advIntervalSeconds, baselineFixed)) {
-        continue;
+      for (const scanWindowSecondsRaw of axes.scanWindowSecondsList) {
+        const scanWindowSeconds = Math.min(scanWindowSecondsRaw, scanIntervalSeconds);
+        if (fixedGridCellMatchesBaseline(scanIntervalSeconds, advIntervalSeconds, scanWindowSeconds, burstSeconds, baselineFixed)) {
+          continue;
+        }
+        const wKey = String(scanWindowSecondsRaw).replace(".", "p");
+        const policyId = `sweep-fixed-s${scanIntervalSeconds}-a${advIntervalSeconds}-w${wKey}`;
+        const policy: FixedPolicyConfig = {
+          type: "fixed",
+          id: policyId,
+          name: `Fixed ${scanIntervalSeconds}s scan / ${scanWindowSeconds}s window / ${advIntervalSeconds}s adv`,
+          scanIntervalSeconds,
+          scanWindowSeconds,
+          advIntervalSeconds,
+          advertisingBurstDurationSeconds: burstSeconds
+        };
+        pushFixedSweepCombo(policyId, "fixed_sweep", policy);
       }
-      const scanWindowSeconds = axes.heldScanWindowSeconds;
-      const policyId = `sweep-fixed-s${scanIntervalSeconds}-a${advIntervalSeconds}`;
-      const policy: FixedPolicyConfig = {
-        type: "fixed",
-        id: policyId,
-        name: `Fixed ${scanIntervalSeconds}s scan / ${advIntervalSeconds}s adv`,
-        scanIntervalSeconds,
-        scanWindowSeconds,
-        advIntervalSeconds,
-        advertisingBurstDurationSeconds: burstSeconds
-      };
-      pushFixedSweepCombo(policyId, "fixed_sweep", policy);
     }
   }
   return trials;
@@ -439,8 +454,7 @@ export function buildSweepTrials(
 ): SweepTrial[] {
   const variant = resolveGridVariant(options?.gridVariant);
   const simConfig = options?.simulationConfig ?? defaultSimulationConfig;
-  const presetDef = bleBaselinePresetDefForSweep(simConfig);
-  const timingAnchors = buildAdaptiveAnchorsFromBaseline(presetDef);
+  const timingAnchors = focusedSweepAdaptiveTimingAnchors();
   const seeds = seedsForSweepMode(mode, currentSeed, {
     reportSeedCount: options?.reportSeedCount
   });
@@ -698,7 +712,8 @@ function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string
   if (kind === "fixed_sweep") {
     const s = r.scheduledScanIntervalSeconds ?? "?";
     const a = r.scheduledAdvIntervalSeconds ?? "?";
-    return `Fixed ${s}s scan / ${a}s adv`;
+    const w = r.scheduledScanWindowSeconds ?? "?";
+    return `Fixed ${s}s scan / ${w}s window / ${a}s adv`;
   }
   if (kind === "baseline_fixed_inactive_scan_x3") {
     const pid = blePolicyPresetIdForFixedPolicy({
@@ -856,15 +871,15 @@ export function finalizeSweepBundle(
 /** Build an active policy config for loading a sweep row into the Simulator. */
 export function firmwarePolicyFromSweepSummary(
   summary: SweepPolicySummary,
-  sweepBaseConfig?: SimulationConfig
+  _sweepBaseConfig?: SimulationConfig
 ): FirmwarePolicyConfig | null {
+  void _sweepBaseConfig;
   if (!summary.params) {
     return null;
   }
   if (summary.params.family === "adaptive") {
     const p = summary.params;
-    const presetDef = bleBaselinePresetDefForSweep(sweepBaseConfig ?? defaultSimulationConfig);
-    const anchors = buildAdaptiveAnchorsFromBaseline(presetDef);
+    const anchors = focusedSweepAdaptiveTimingAnchors();
     const built = sweepAdaptivePolicyFromGrid(
       p.baselineDrive,
       p.motionWeight,

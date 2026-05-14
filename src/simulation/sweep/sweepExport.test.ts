@@ -36,25 +36,24 @@ function stubBundle(mode: SweepResultBundle["mode"] = "fast"): SweepResultBundle
 }
 
 describe("buildSweepMarkdownReport", () => {
-  it("does not claim a Juxta baseline when general-discovery is selected", () => {
-    const cfg = { ...defaultSimulationConfig, blePolicyPresetId: "general-discovery" as const };
+  it("does not claim a Juxta baseline when balanced-adaptive is selected", () => {
+    const cfg = { ...defaultSimulationConfig, blePolicyPresetId: "balanced-adaptive" as const };
     const md = buildSweepMarkdownReport({
       baseConfig: cfg,
       bundle: stubBundle(),
       candidates: [] as CandidatePick[]
     });
     expect(md.toLowerCase()).not.toContain("juxta baseline");
-    expect(md).toMatch(/asymmetric/i);
+    expect(md).toMatch(/asymmetric|battery|small-battery/i);
   });
 
-  it("warns when comparison baseline is symmetric-example", () => {
-    const cfg = { ...defaultSimulationConfig, blePolicyPresetId: "symmetric-example" as const };
+  it("notes energy tradeoff when comparison baseline is high-capture", () => {
+    const cfg = { ...defaultSimulationConfig, blePolicyPresetId: "high-capture" as const };
     const md = buildSweepMarkdownReport({
       baseConfig: cfg,
       bundle: stubBundle(),
       candidates: [] as CandidatePick[]
     });
-    expect(md).toMatch(/symmetric/i);
-    expect(md).toMatch(/efficient/i);
+    expect(md).toMatch(/high-capture|energy/i);
   });
 });

@@ -78,13 +78,13 @@ export function buildSweepSimulationBrief(
     { label: "Energy", value: `${energyLabel} · ${config.energy.batteryCapacityMah} mAh pack` },
     {
       label: "Comparison BLE baseline",
-      value: `${baselinePreset.label} — scan ${baselinePreset.scanIntervalSeconds}s / adv ${baselinePreset.advIntervalSeconds}s (fixed bursts: scan 3s / adv 0.5s)`
+      value: `${baselinePreset.label} — scan ${baselinePreset.scanIntervalSeconds}s / window ${baselinePreset.scanWindowSeconds}s / adv ${baselinePreset.advIntervalSeconds}s (${baselinePreset.advertisingBurstDurationSeconds}s adv burst)`
     },
     { label: "Hardware energy profile", value: hw },
     {
       label: "Collar policy",
       value:
-        "Sweep substitutes schedules (comparison baseline row + fixed-rate grid over scan/advertise intervals + adaptive grid). The active Simulator policy is not run as-is unless it matches a swept row."
+        "Sweep substitutes schedules (comparison baseline row + fixed-rate factorial over scan, advertise, and scan window + adaptive grid). The active Simulator policy is not run as-is unless it matches a swept row."
     }
   ];
 }

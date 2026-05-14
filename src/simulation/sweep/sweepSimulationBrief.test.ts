@@ -13,7 +13,7 @@ describe("buildSweepSimulationBrief", () => {
     expect(byLabel.Seeds).toContain("99");
     expect(byLabel.Seeds).toContain("Simulated Seed");
     expect(byLabel["Collar policy"]).toMatch(/Sweep substitutes/);
-    expect(byLabel["Comparison BLE baseline"]).toMatch(/General discovery/);
+    expect(byLabel["Comparison BLE baseline"]).toMatch(/Balanced adaptive|scan 30/);
     expect(byLabel["Hardware energy profile"]).toMatch(/Generic nRF52840/);
     expect(byLabel.Energy).toMatch(/Routine-linear/);
   });

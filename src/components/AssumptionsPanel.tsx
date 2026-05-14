@@ -51,8 +51,9 @@ export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
             </li>
             <li>
               Energy uses a routine-level linear bench fit: mean current is intercept + scan-duty and advertise-duty terms.
-              Scan and advertise burst durations are fixed simulator assumptions (3 s scan, 0.5 s advertise) used for
-              scheduling/capture, not exposed energy sliders. Hardware assumes <strong>+8 dBm</strong> TX for RSSI priors.
+              Burst durations follow the active BLE policy (default catalog baselines use short scan windows and 2 s advertise
+              bursts). Legacy bench copy may still cite 3 s / 0.5 s routines. Hardware assumes <strong>+8 dBm</strong> TX for
+              RSSI priors.
             </li>
             <li>
               Raw BLE detections are behavior- and schedule-dependent observations; they should not be interpreted as
