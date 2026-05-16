@@ -5,6 +5,7 @@ import {
   type OptimizerScatterObserved
 } from "./OptimizerPlots";
 import type { SimulationConfig } from "../simulation/types";
+import { FIXED_ADVERTISING_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
 import { firmwarePolicyFromSweepSummary } from "../simulation/sweep/adaptiveBleSweep";
 import type { SweepBundleWithCandidates } from "../simulation/sweep/adaptiveBleSweep";
 import type { SweepPolicySummary } from "../simulation/sweep/sweepCandidates";
@@ -60,8 +61,8 @@ function sweepSummaryMatchesBuilt(summary: SweepPolicySummary, config: Simulatio
   }
   if (summary.params.family === "fixed" && active.type === "fixed") {
     const p = summary.params;
-    const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? 2;
-    const burstA = active.advertisingBurstDurationSeconds ?? 2;
+    const burstP = p.advertisingBurstDurationSeconds ?? active.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
+    const burstA = active.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
     const pInactive = p.doubleWhenInactive === true;
     const aInactive = active.doubleWhenInactive === true;
     const pMult = p.inactiveScanIntervalMultiplier ?? 2;

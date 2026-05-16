@@ -506,8 +506,8 @@ describe("simulation engine", () => {
     const high = mapAdaptiveTiming(0.75, defaultAdaptivePolicy.timingAnchors);
 
     expect(neutral.scanIntervalSeconds).toBeCloseTo(30);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
-    expect(neutral.advIntervalSeconds).toBeCloseTo(7.5);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(3);
+    expect(neutral.advIntervalSeconds).toBeCloseTo(10);
     expect(low.scanIntervalSeconds).toBeGreaterThan(neutral.scanIntervalSeconds);
     expect(low.scanWindowSeconds).toBeLessThan(neutral.scanWindowSeconds);
     expect(low.advIntervalSeconds).toBeGreaterThan(neutral.advIntervalSeconds);

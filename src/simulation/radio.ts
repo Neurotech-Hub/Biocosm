@@ -1,3 +1,4 @@
+import { FIXED_SCAN_BURST_SECONDS } from "./bleTimingAssumptions";
 import { animalDistance, interpolatedAnimalDistance } from "./geometry";
 import { SeededRandom } from "./random";
 import type {
@@ -11,7 +12,8 @@ import type {
   TrueContact
 } from "./types";
 
-export const scanBurstDurationSeconds = 1.5;
+/** Legacy alias for production scan burst wall time (nRF52 `SCAN_BURST_MS`). */
+export const scanBurstDurationSeconds = FIXED_SCAN_BURST_SECONDS;
 export const interBurstDelaySeconds = 0.1;
 export const SCAN_LISTEN_INTERVAL_SECONDS = 0.05;
 export const SCAN_LISTEN_WINDOW_SECONDS = 0.0125;
@@ -133,6 +135,7 @@ export function createBleBurstEvents(
       guard += 1;
       const scanDueAt = Math.max(cursor, nextScanDue);
       const advDueAt = Math.max(cursor, nextAdvDue);
+      // nRF52 production: serial radio; when scan and advertise are both due, scan wins (ties → scan).
       const kind: BleBurstEvent["kind"] = scanDueAt <= advDueAt ? "scan" : "advertise";
       const dueAt = kind === "scan" ? scanDueAt : advDueAt;
 

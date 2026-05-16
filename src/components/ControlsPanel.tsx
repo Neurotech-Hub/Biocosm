@@ -10,7 +10,7 @@ import {
   motionPeerAdaptiveWithBleBaselineAnchors,
   normalizeBlePolicyPresetId
 } from "../simulation/blePolicyPresets";
-import { BASELINE_CATALOG_ADVERTISING_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
+import { BASELINE_CATALOG_ADVERTISING_BURST_SECONDS, FIXED_ADVERTISING_BURST_SECONDS } from "../simulation/bleTimingAssumptions";
 import { defaultAdaptivePolicy, defaultBaselineFixedPolicy } from "../simulation/config";
 import {
   applyHardwareProfileToEnergy,
@@ -660,14 +660,31 @@ export function ControlsPanel({
             Scan interval: {fixedPolicy.scanIntervalSeconds}s
             <input
               type="range"
-              min="15"
-              max="90"
+              min="10"
+              max="60"
               step="5"
               value={fixedPolicy.scanIntervalSeconds}
               onChange={(event) =>
                 syncFixedPolicyAndPreset({
                   ...fixedPolicy,
                   scanIntervalSeconds: Number(event.target.value)
+                })
+              }
+            />
+          </label>
+
+          <label>
+            Scan window: {fixedPolicy.scanWindowSeconds}s (passive listen burst, production default 3s)
+            <input
+              type="range"
+              min="1"
+              max="5"
+              step="1"
+              value={fixedPolicy.scanWindowSeconds}
+              onChange={(event) =>
+                syncFixedPolicyAndPreset({
+                  ...fixedPolicy,
+                  scanWindowSeconds: Number(event.target.value)
                 })
               }
             />
@@ -691,10 +708,10 @@ export function ControlsPanel({
           </label>
 
           <p className="helper-text">
-            This schedule uses a <strong>{fixedPolicy.scanWindowSeconds}</strong> s passive scan window and{" "}
-            <strong>{fixedPolicy.advertisingBurstDurationSeconds}</strong> s advertise bursts (from the catalog baseline).
-            Change the baseline above to switch both; scan and advertise intervals are adjustable here when using fixed-rate
-            BLE.
+            Passive scan window and non-connectable advertise burst are fixed to production firmware (
+            <strong>{fixedPolicy.scanWindowSeconds}</strong>s scan window,{" "}
+            <strong>{FIXED_ADVERTISING_BURST_SECONDS}</strong>s advertise burst). Scan and advertise intervals are adjustable
+            here for fixed-rate BLE.
           </p>
 
           <label className="checkbox-label">
@@ -1337,16 +1354,16 @@ function nearlyEqual(a: number, b: number): boolean {
 
 const adaptiveRangePresets = {
   conservative: {
-    lowIntensity: { scanIntervalSeconds: 90, scanWindowSeconds: 0.35, advIntervalSeconds: 10 },
-    highIntensity: { scanIntervalSeconds: 20, scanWindowSeconds: 0.5, advIntervalSeconds: 5 }
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 1, advIntervalSeconds: 20 },
+    highIntensity: { scanIntervalSeconds: 30, scanWindowSeconds: 3, advIntervalSeconds: 10 }
   },
   balanced: {
-    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 0.4, advIntervalSeconds: 9 },
-    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 0.65, advIntervalSeconds: 5.5 }
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 1, advIntervalSeconds: 20 },
+    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 5, advIntervalSeconds: 5 }
   },
   aggressive: {
-    lowIntensity: { scanIntervalSeconds: 120, scanWindowSeconds: 0.35, advIntervalSeconds: 15 },
-    highIntensity: { scanIntervalSeconds: 5, scanWindowSeconds: 0.75, advIntervalSeconds: 2 }
+    lowIntensity: { scanIntervalSeconds: 60, scanWindowSeconds: 1, advIntervalSeconds: 20 },
+    highIntensity: { scanIntervalSeconds: 10, scanWindowSeconds: 5, advIntervalSeconds: 2 }
   }
 } as const;
 

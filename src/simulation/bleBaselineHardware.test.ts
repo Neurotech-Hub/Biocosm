@@ -18,15 +18,15 @@ describe("BLE baseline vs hardware energy separation", () => {
   it("neutral adaptive timing uses default focused anchors from default config", () => {
     const neutral = mapAdaptiveTiming(0.5, defaultAdaptivePolicy.timingAnchors);
     expect(neutral.scanIntervalSeconds).toBeCloseTo(30);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
-    expect(neutral.advIntervalSeconds).toBeCloseTo(7.5);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(3);
+    expect(neutral.advIntervalSeconds).toBeCloseTo(10);
   });
 
-  it("low-intensity anchor matches focused sweep low anchor (90s scan / 0.35s win / 10s adv)", () => {
+  it("low-intensity anchor matches focused sweep low anchor (60s scan / 1s win / 20s adv)", () => {
     const low = mapAdaptiveTiming(0, defaultAdaptivePolicy.timingAnchors);
-    expect(low.scanIntervalSeconds).toBeCloseTo(90);
-    expect(low.scanWindowSeconds).toBeCloseTo(0.35);
-    expect(low.advIntervalSeconds).toBeCloseTo(10);
+    expect(low.scanIntervalSeconds).toBeCloseTo(60);
+    expect(low.scanWindowSeconds).toBeCloseTo(1);
+    expect(low.advIntervalSeconds).toBeCloseTo(20);
   });
   it("sweep includes baseline_fixed row for selected BLE preset id", () => {
     const trials = buildSweepTrials("fast", "42", {

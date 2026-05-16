@@ -107,8 +107,8 @@ export function SweepControlsPanel({
         <InfoPopover label="Sweep details and grid size" title="About this sweep">
           <p>
             Smoke test, interactive, and full all use the <strong>same focused grid</strong> today ({quickPoliciesPerSeed}{" "}
-            policies per seed: comparison baseline nominal + inactive scan ×3/×5, each factorial cell the same way, plus 54
-            adaptive runs). The dropdown is kept for workflow labels.
+            policies per seed: comparison baseline nominal + inactive scan ×3/×5, each factorial cell the same way, plus{" "}
+            {quickAdaptiveCount} adaptive runs). The dropdown is kept for workflow labels.
           </p>
           <p>
             Each run is <strong>fixed-rate schedules + adaptive policies</strong> per seed, anchored to your comparison BLE
@@ -121,14 +121,15 @@ export function SweepControlsPanel({
           </p>
           <p>
             Fixed-rate grid varies <strong>scan interval</strong>, <strong>advertise interval</strong>, and{" "}
-            <strong>scan window</strong> (5×3×3 = 45 cells). Each distinct schedule runs as nominal fixed, then inactive scan ×3
-            and ×5 (bout-delayed stretch). Advertise burst is <strong>{FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS}s</strong> on
-            the sweep grid; one factorial cell may duplicate the comparison baseline and is skipped.
+            <strong>scan window</strong> (3×3×3 = 27 cells). Each distinct schedule runs as nominal fixed, then inactive scan ×3
+            and ×5 (bout-delayed stretch). <strong>Advertise burst is held constant</strong> at{" "}
+            <strong>{FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS}s</strong> (firmware non-connectable burst); one factorial cell
+            may duplicate the comparison baseline and is skipped.
           </p>
           <p>
             Adaptive grid: <code>baselineDrive</code> {formatNumList(execSummary.adaptiveAxes.baselineDrives)}, motionWeight{" "}
             {formatNumList(execSummary.adaptiveAxes.motionWeights)}, peerWeight {formatNumList(execSummary.adaptiveAxes.peerWeights)}, τ_peer{" "}
-            {formatNumList(execSummary.adaptiveAxes.tauPeerSeconds)} s (3×3×3×2 = 54 policies per seed).
+            {formatNumList(execSummary.adaptiveAxes.tauPeerSeconds)} s (3×2×2×2 = {quickAdaptiveCount} policies per seed).
           </p>
           <p>
             Aggregate mode draws world seeds from a fixed pool ({SWEEP_REPORT_SEED_POOL.join(", ")}). Choose how many seeds to
@@ -294,7 +295,7 @@ export function SweepControlsPanel({
             <dd>{formatNumList(execSummary.fixedAxes.scanWindowSecondsList)}</dd>
           </div>
           <div className="sweep-grid-details-row">
-            <dt>Fixed advertise burst (sweep grid)</dt>
+            <dt>Advertise burst (held constant)</dt>
             <dd>{FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS}s</dd>
           </div>
           <div className="sweep-grid-details-row sweep-grid-details-row--block">

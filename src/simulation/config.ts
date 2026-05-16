@@ -121,7 +121,7 @@ export const defaultSimulationConfig: SimulationConfig = {
   },
   energy: energyConfigFromHardwareProfileId(DEFAULT_HARDWARE_ENERGY_PROFILE_ID),
   bleScheduling: { ...defaultBleScheduling },
-  /** Matches `blePolicyPresetId` default baseline (balanced adaptive: 30 s scan / 0.5 s window / 7.5 s adv / 2 s burst). */
+  /** Matches `blePolicyPresetId` default baseline (balanced adaptive: 30 s scan / 3 s window / 10 s adv / 0.5 s burst). */
   activePolicy: { ...defaultBaselineFixedPolicy }
 };
 

@@ -46,12 +46,12 @@ export const SWEEP_HELD_ADAPTIVE = {
 } as const;
 
 /**
- * Focused sweep adaptive grid: 3×3×3×2 = **54** policies per seed
- * ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §9).
+ * Adaptive sweep grid: 3×2×2×2 = **24** policies per seed
+ * (baselineDrive × motionWeight × peerWeight × τ_peer).
  */
 export const SWEEP_BASELINE_DRIVES = [0.15, 0.25, 0.35] as const;
-export const SWEEP_MOTION_WEIGHTS = [0.1, 0.2, 0.3] as const;
-export const SWEEP_PEER_WEIGHTS = [0.4, 0.5, 0.6] as const;
+export const SWEEP_MOTION_WEIGHTS = [0.2, 0.4] as const;
+export const SWEEP_PEER_WEIGHTS = [0.2, 0.4] as const;
 export const SWEEP_TAU_PEER_SECONDS = [120, 200] as const;
 
 export const SWEEP_FULL_BASELINE_DRIVES = SWEEP_BASELINE_DRIVES;
@@ -69,12 +69,12 @@ export const SWEEP_MINIMAL_MOTION_WEIGHTS = SWEEP_MOTION_WEIGHTS;
 export const SWEEP_MINIMAL_PEER_WEIGHTS = SWEEP_PEER_WEIGHTS;
 export const SWEEP_MINIMAL_TAU_PEER_SECONDS = SWEEP_TAU_PEER_SECONDS;
 
-/** Fixed-rate sweep uses 2 s advertising bursts on the focused grid ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §6). */
+/** Fixed-rate sweep holds firmware-aligned non-connectable advertise burst (0.5 s). */
 export const SWEEP_FIXED_ADVERTISING_BURST_SECONDS = FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS;
 
-const SWEEP_FIXED_SCAN_INTERVALS = [20, 30, 45, 60, 90] as const;
-const SWEEP_FIXED_ADV_INTERVALS = [5, 7.5, 10] as const;
-const SWEEP_FIXED_SCAN_WINDOW_SECONDS = [0.35, 0.5, 0.75] as const;
+const SWEEP_FIXED_SCAN_INTERVALS = [10, 30, 60] as const;
+const SWEEP_FIXED_ADV_INTERVALS = [5, 10, 20] as const;
+const SWEEP_FIXED_SCAN_WINDOW_SECONDS = [1, 3, 5] as const;
 
 type InactiveStretchVariantDef = {
   mult: number;
@@ -170,7 +170,7 @@ export function getSweepAxes(variant?: SweepGridVariant): SweepAxes {
   };
 }
 
-/** Number of adaptive policies in the active grid (54). */
+/** Number of adaptive policies in the active grid (24). */
 export function adaptiveSweepPolicyCount(variant?: SweepGridVariant): number {
   const axes = getSweepAxes(variant);
   return (
@@ -702,7 +702,7 @@ function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string
       scanIntervalSeconds: r.scheduledScanIntervalSeconds ?? 0,
       scanWindowSeconds: r.scheduledScanWindowSeconds ?? 0,
       advIntervalSeconds: r.scheduledAdvIntervalSeconds ?? 0,
-      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? 2
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? SWEEP_FIXED_ADVERTISING_BURST_SECONDS
     };
     const pid = blePolicyPresetIdForFixedPolicy(pseudo);
     const label =
@@ -723,7 +723,7 @@ function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string
       scanIntervalSeconds: r.scheduledScanIntervalSeconds ?? 0,
       scanWindowSeconds: r.scheduledScanWindowSeconds ?? 0,
       advIntervalSeconds: r.scheduledAdvIntervalSeconds ?? 0,
-      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? 2
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? SWEEP_FIXED_ADVERTISING_BURST_SECONDS
     });
     const label =
       pid !== BLE_POLICY_CUSTOM_ID ? getBlePolicyPreset(pid)?.label ?? pid : "Custom";
@@ -742,7 +742,7 @@ function summaryLabelForKind(kind: SweepPolicyKind, rows: SweepRawRow[]): string
       scanIntervalSeconds: r.scheduledScanIntervalSeconds ?? 0,
       scanWindowSeconds: r.scheduledScanWindowSeconds ?? 0,
       advIntervalSeconds: r.scheduledAdvIntervalSeconds ?? 0,
-      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? 2
+      advertisingBurstDurationSeconds: r.scheduledAdvertisingBurstDurationSeconds ?? SWEEP_FIXED_ADVERTISING_BURST_SECONDS
     });
     const label =
       pid !== BLE_POLICY_CUSTOM_ID ? getBlePolicyPreset(pid)?.label ?? pid : "Custom";
@@ -890,7 +890,7 @@ export function firmwarePolicyFromSweepSummary(
     return { ...built, id: summary.policyId, name: summary.label };
   }
   const p = summary.params;
-  const burst = p.advertisingBurstDurationSeconds ?? 2;
+  const burst = p.advertisingBurstDurationSeconds ?? SWEEP_FIXED_ADVERTISING_BURST_SECONDS;
   const fixed: FixedPolicyConfig = {
     type: "fixed",
     id: summary.policyId,

@@ -227,7 +227,7 @@ export function buildSweepMarkdownReport(options: {
   );
   if (presetDef.id === "balanced-adaptive") {
     lines.push(
-      "- Note: The default BLE baseline targets a small-battery regime (moderate scan/advertise cadence with 2 s advertise bursts). Asymmetric scan/advertise overlap still drives proximity capture."
+      "- Note: The default BLE baseline uses firmware-aligned bursts (0.5 s advertise, scan window per preset) with moderate scan/advertise cadence. Asymmetric scan/advertise scheduling still drives proximity capture."
     );
   }
   if (presetDef.id === "high-capture") {

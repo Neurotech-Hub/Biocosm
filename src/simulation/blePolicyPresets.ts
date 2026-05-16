@@ -40,22 +40,25 @@ export function normalizeBlePolicyPresetId(id: string): string {
   return BLE_PRESET_ID_REDIRECTS[id] ?? id;
 }
 
-/** Shared adaptive anchors for catalog baselines + focused sweep ([docs/biocosm_baseline_simplification_5p5mah_sweep_spec.md] §3, §8). */
+/**
+ * Adaptive timing anchors aligned with nRF52 production: scan intervals 60 → 30 → 10 s,
+ * scan windows 1 → 3 → 5 s, advertise burst fixed at firmware `ADV_BURST_MS` (0.5 s).
+ */
 export function focusedSweepAdaptiveTimingAnchors(): AdaptiveBleTimingAnchors {
   return {
     lowIntensity: {
-      scanIntervalSeconds: 90,
-      scanWindowSeconds: 0.35,
-      advIntervalSeconds: 10
+      scanIntervalSeconds: 60,
+      scanWindowSeconds: 1,
+      advIntervalSeconds: 20
     },
     neutral: {
       scanIntervalSeconds: 30,
-      scanWindowSeconds: 0.5,
-      advIntervalSeconds: 7.5
+      scanWindowSeconds: 3,
+      advIntervalSeconds: 10
     },
     highIntensity: {
-      scanIntervalSeconds: 15,
-      scanWindowSeconds: 0.75,
+      scanIntervalSeconds: 10,
+      scanWindowSeconds: 5,
       advIntervalSeconds: 5
     },
     advertisingBurstDurationSeconds: BASELINE_CATALOG_ADVERTISING_BURST_SECONDS
@@ -68,8 +71,8 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     label: "Balanced adaptive",
     description: "Recommended starting point for adaptive mode under a small-battery budget.",
     scanIntervalSeconds: 30,
-    scanWindowSeconds: 0.5,
-    advIntervalSeconds: 7.5,
+    scanWindowSeconds: 3,
+    advIntervalSeconds: 10,
     advertisingBurstDurationSeconds: BASELINE_CATALOG_ADVERTISING_BURST_SECONDS
   },
   "low-power": {
@@ -77,7 +80,7 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     label: "Low-power",
     description: "Lower-energy schedule with reduced scan effort and slower advertising.",
     scanIntervalSeconds: 60,
-    scanWindowSeconds: 0.35,
+    scanWindowSeconds: 1,
     advIntervalSeconds: 10,
     advertisingBurstDurationSeconds: BASELINE_CATALOG_ADVERTISING_BURST_SECONDS
   },
@@ -85,8 +88,8 @@ export const blePolicyPresets: Record<string, BlePolicyPresetDef> = {
     id: "high-capture",
     label: "High-capture",
     description: "Higher-capture schedule with more frequent scanning and advertising.",
-    scanIntervalSeconds: 15,
-    scanWindowSeconds: 0.75,
+    scanIntervalSeconds: 10,
+    scanWindowSeconds: 5,
     advIntervalSeconds: 5,
     advertisingBurstDurationSeconds: BASELINE_CATALOG_ADVERTISING_BURST_SECONDS
   }

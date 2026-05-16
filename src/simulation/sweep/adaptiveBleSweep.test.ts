@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   baselineFixedPolicyForSweep,
+  BLE_POLICY_CUSTOM_ID,
   blePolicyPresets,
   DEFAULT_BLE_POLICY_PRESET_ID,
   focusedSweepAdaptiveTimingAnchors,
@@ -37,39 +38,39 @@ const adaptiveGridProduct =
   SWEEP_TAU_PEER_SECONDS.length;
 
 describe("adaptive BLE sweep", () => {
-  it("uses focused grid: 54 adaptives + fixed factorial with inactive ×3/×5 per combo (default baseline)", () => {
-    expect(adaptiveGridProduct).toBe(54);
+  it("uses focused grid: 24 adaptives + fixed factorial with inactive ×3/×5 per combo (default baseline)", () => {
+    expect(adaptiveGridProduct).toBe(24);
     expect(SWEEP_MINIMAL_BASELINE_DRIVES).toEqual(SWEEP_BASELINE_DRIVES);
 
-    expect(fixedSweepPolicyCount("quick")).toBe(135);
-    expect(adaptiveSweepPolicyCount("quick")).toBe(54);
-    expect(policiesPerSweepSeed("quick")).toBe(189);
-    expect(fixedSweepPolicyCount("minimal")).toBe(135);
-    expect(policiesPerSweepSeed("full")).toBe(189);
+    expect(fixedSweepPolicyCount("quick")).toBe(81);
+    expect(adaptiveSweepPolicyCount("quick")).toBe(24);
+    expect(policiesPerSweepSeed("quick")).toBe(105);
+    expect(fixedSweepPolicyCount("minimal")).toBe(81);
+    expect(policiesPerSweepSeed("full")).toBe(105);
 
-    expect(buildSweepGridPolicies("quick", quickSweepAnchors)).toHaveLength(54);
+    expect(buildSweepGridPolicies("quick", quickSweepAnchors)).toHaveLength(24);
     expect(buildSweepTrials("fast", "42", { gridVariant: "quick" })).toHaveLength(
       sweepTrialCount("fast", { gridVariant: "quick" })
     );
     expect(buildSweepTrials("report", "42", { gridVariant: "quick", reportSeedCount: 3 })).toHaveLength(
       sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })
     );
-    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(189);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(567);
-    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(945);
+    expect(sweepTrialCount("fast", { gridVariant: "quick" })).toBe(105);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 3 })).toBe(315);
+    expect(sweepTrialCount("report", { gridVariant: "quick", reportSeedCount: 5 })).toBe(525);
   });
 
   it("adaptive grid includes low- and high-duty corners", () => {
     const policies = buildSweepGridPolicies("quick", quickSweepAnchors);
-    expect(policies.some((p) => p.baselineDrive === 0.15 && p.motionWeight === 0.1 && p.peerWeight === 0.4)).toBe(true);
-    expect(policies.some((p) => p.baselineDrive === 0.35 && p.motionWeight === 0.3 && p.peerWeight === 0.6)).toBe(true);
+    expect(policies.some((p) => p.baselineDrive === 0.15 && p.motionWeight === 0.2 && p.peerWeight === 0.2)).toBe(true);
+    expect(policies.some((p) => p.baselineDrive === 0.35 && p.motionWeight === 0.4 && p.peerWeight === 0.4)).toBe(true);
     expect(policies.some((p) => p.tauPeerSeconds === 200 && p.peerWeight === 0.4)).toBe(true);
     expect(
       policies.some(
         (p) =>
           p.baselineDrive === 0.35 &&
-          p.motionWeight === 0.3 &&
-          p.peerWeight === 0.6 &&
+          p.motionWeight === 0.4 &&
+          p.peerWeight === 0.4 &&
           p.tauPeerSeconds === 200 &&
           p.tauMotionSeconds === 180 &&
           p.peerGain === 0.45 &&
@@ -86,9 +87,9 @@ describe("adaptive BLE sweep", () => {
       doubleWhenInactive: false,
       inactiveScanIntervalMultiplier: null,
       scheduledScanIntervalSeconds: 30,
-      scheduledScanWindowSeconds: 0.5,
-      scheduledAdvIntervalSeconds: 7.5,
-      scheduledAdvertisingBurstDurationSeconds: 2,
+      scheduledScanWindowSeconds: 3,
+      scheduledAdvIntervalSeconds: 10,
+      scheduledAdvertisingBurstDurationSeconds: 0.5,
       baselineDrive: null,
       motionWeight: null,
       peerWeight: null,
@@ -112,8 +113,8 @@ describe("adaptive BLE sweep", () => {
       percentTimeNearFixed: null,
       percentTimeAboveFixed: null,
       meanScanIntervalSeconds: 30,
-      meanScanWindowSeconds: 0.5,
-      meanAdvIntervalSeconds: 7.5,
+      meanScanWindowSeconds: 3,
+      meanAdvIntervalSeconds: 10,
       ...overrides
     });
 
@@ -194,18 +195,18 @@ describe("adaptive BLE sweep", () => {
   it("fixed sweep axes match focused factorial (scan × adv × window)", () => {
     const baseline = baselineFixedPolicyForSweep(defaultSimulationConfig);
     const axes = getFixedSweepAxes("quick", baseline);
-    expect(axes.scanIntervals).toEqual([20, 30, 45, 60, 90]);
-    expect(axes.advIntervals).toEqual([5, 7.5, 10]);
-    expect(axes.scanWindowSecondsList).toEqual([0.35, 0.5, 0.75]);
+    expect(axes.scanIntervals).toEqual([10, 30, 60]);
+    expect(axes.advIntervals).toEqual([5, 10, 20]);
+    expect(axes.scanWindowSecondsList).toEqual([1, 3, 5]);
   });
 
   it("defaults ble preset to balanced-adaptive with reference schedule", () => {
     expect(DEFAULT_BLE_POLICY_PRESET_ID).toBe("balanced-adaptive");
     const ref = referenceDiscoveryBlePreset();
     expect(ref.scanIntervalSeconds).toBe(30);
-    expect(ref.scanWindowSeconds).toBe(0.5);
-    expect(ref.advIntervalSeconds).toBe(7.5);
-    expect(ref.advertisingBurstDurationSeconds).toBe(2);
+    expect(ref.scanWindowSeconds).toBe(3);
+    expect(ref.advIntervalSeconds).toBe(10);
+    expect(ref.advertisingBurstDurationSeconds).toBe(0.5);
     expect(defaultSimulationConfig.blePolicyPresetId).toBe("balanced-adaptive");
   });
 
@@ -218,27 +219,39 @@ describe("adaptive BLE sweep", () => {
   it("neutral adaptive timing at sampling drive 0.5 matches focused anchors", () => {
     const neutral = mapAdaptiveTiming(0.5, defaultAdaptivePolicy.timingAnchors);
     expect(neutral.scanIntervalSeconds).toBeCloseTo(30);
-    expect(neutral.scanWindowSeconds).toBeCloseTo(0.5);
-    expect(neutral.advIntervalSeconds).toBeCloseTo(7.5);
+    expect(neutral.scanWindowSeconds).toBeCloseTo(3);
+    expect(neutral.advIntervalSeconds).toBeCloseTo(10);
   });
 
-  it("high-capture baseline is off the factorial grid so fixed count includes all 45 cells, each with inactive variants", () => {
-    const cfg = { ...defaultSimulationConfig, blePolicyPresetId: "high-capture" as const };
-    const baseline = baselineFixedPolicyForSweep(cfg);
-    const trials = buildSweepTrials("fast", "42", { gridVariant: "quick", simulationConfig: cfg });
+  it("custom baseline off factorial grid yields full 27 cells plus inactive variants", () => {
+    const offGridCfg = {
+      ...defaultSimulationConfig,
+      blePolicyPresetId: BLE_POLICY_CUSTOM_ID,
+      activePolicy: {
+        type: "fixed" as const,
+        id: "custom-offgrid",
+        name: "Custom off grid",
+        scanIntervalSeconds: 11,
+        scanWindowSeconds: 2,
+        advIntervalSeconds: 7,
+        advertisingBurstDurationSeconds: 0.5
+      }
+    };
+    const baseline = baselineFixedPolicyForSweep(offGridCfg);
+    const trials = buildSweepTrials("fast", "42", { gridVariant: "quick", simulationConfig: offGridCfg });
     expect(
       trials.some(
         (t) =>
           t.kind === "fixed_sweep" &&
           t.policy.type === "fixed" &&
-          t.policy.scanIntervalSeconds === 20 &&
-          t.policy.scanWindowSeconds === 0.35 &&
+          t.policy.scanIntervalSeconds === 10 &&
+          t.policy.scanWindowSeconds === 1 &&
           t.policy.advIntervalSeconds === 5
       )
     ).toBe(true);
-    expect(fixedSweepPolicyCount("quick", baseline)).toBe(138);
-    expect(policiesPerSweepSeed("quick", baseline)).toBe(192);
-    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: cfg })).toBe(192);
+    expect(fixedSweepPolicyCount("quick", baseline)).toBe(84);
+    expect(policiesPerSweepSeed("quick", baseline)).toBe(108);
+    expect(sweepTrialCount("fast", { gridVariant: "quick", simulationConfig: offGridCfg })).toBe(108);
     expect(trials.some((t) => t.policyId.endsWith("-i3") && t.kind === "fixed_sweep_inactive_scan_x3")).toBe(true);
     expect(trials.some((t) => t.policyId.endsWith("-i5") && t.kind === "fixed_sweep_inactive_scan_x5")).toBe(true);
   });

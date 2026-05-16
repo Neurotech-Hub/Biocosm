@@ -1,4 +1,5 @@
 import { adaptiveSamplingDrive } from "./policies/adaptive";
+import { FIXED_ADVERTISING_BURST_SECONDS } from "./bleTimingAssumptions";
 import type { SimulationLogs, SimulationState } from "./types";
 
 export type TimeSeriesPoint = {
@@ -170,7 +171,7 @@ export function buildFixedBleTimeSeries(timeline: SimulationState[]): FixedBleTi
       noScanWindow: false
     }));
   }
-  const advBurst = policy.advertisingBurstDurationSeconds ?? 2;
+  const advBurst = policy.advertisingBurstDurationSeconds ?? FIXED_ADVERTISING_BURST_SECONDS;
   return timeline.map((state) => {
     const n = Math.max(1, state.animals.length);
     let sumScan = 0;
