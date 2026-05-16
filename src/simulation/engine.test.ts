@@ -682,8 +682,8 @@ describe("simulation engine", () => {
           scanIntervalSeconds: 10,
           scanWindowSeconds: 3,
           advIntervalSeconds: 2,
-          advertisingBurstDurationSeconds: 0.5,
-          combinedEnvelopeDuty: 0.55,
+          advertisingBurstDurationSeconds: 1,
+          combinedEnvelopeDuty: 0.8,
           saturatedScheduleWarning: false
         }
       ]
@@ -824,7 +824,7 @@ function animalAt(id: string, x: number, y: number): Animal {
       scanIntervalSeconds: 60,
       scanWindowSeconds: 3,
       advIntervalSeconds: 60,
-      advertisingBurstDurationSeconds: 0.5,
+      advertisingBurstDurationSeconds: 1,
       scanPhaseOffsetSeconds: 0,
       advPhaseOffsetSeconds: 0,
       motionDrive: 0,

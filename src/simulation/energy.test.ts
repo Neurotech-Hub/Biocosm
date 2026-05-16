@@ -67,7 +67,7 @@ function fixedPolicyForDutyRegression(scanIntervalSeconds: number, advIntervalSe
     scanIntervalSeconds,
     scanWindowSeconds: 3,
     advIntervalSeconds,
-    advertisingBurstDurationSeconds: 0.5
+    advertisingBurstDurationSeconds: 1
   };
 }
 
@@ -137,7 +137,7 @@ describe("energy model", () => {
 
   it("bench_duration uses advertise and scan burst wall seconds", () => {
     const bursts: BleBurstEvent[] = [
-      { kind: "advertise", startTime: 0, endTime: 0.5, animalId: "a", policyId: "p" },
+      { kind: "advertise", startTime: 0, endTime: 1, animalId: "a", policyId: "p" },
       { kind: "scan", startTime: 1, endTime: 2.5, animalId: "a", policyId: "p" }
     ];
     const cfg = benchDurationEnergy({ benchWallTimeCalibrationScale: 1 });
@@ -145,7 +145,7 @@ describe("energy model", () => {
     const epoch = 10;
     const row = computeEnergyLog(epoch, epoch, bursts, cfg, 0);
     expect(row.steadyMah).toBeCloseTo((shelfUa * epoch) / 3_600_000, 8);
-    expect(row.advertisingMah).toBeCloseTo((advActiveUa * 0.5) / 3_600_000, 8);
+    expect(row.advertisingMah).toBeCloseTo((advActiveUa * 1) / 3_600_000, 8);
     expect(row.scanMah).toBeCloseTo((scanActiveUa * 1.5) / 3_600_000, 8);
   });
 

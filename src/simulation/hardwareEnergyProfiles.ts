@@ -46,8 +46,8 @@ const defaultWearableEnergy = {
   benchShelfCurrentMicroAmps: 8.685,
   benchAdvertiseBurstCurrentMicroAmps: 364.625,
   benchScanBurstCurrentMicroAmps: 2893.38,
-  /** 500 ms adv burst per 1 s advertise cadence. */
-  benchProductionAdvDuty: 0.5,
+  /** 1 s adv burst per 1 s advertise cadence (production discovery reference). */
+  benchProductionAdvDuty: 1.0,
   /** Legacy bench_duration calibration duty; routine-linear uses its own coefficients. */
   benchProductionScanDuty: 3 / 20,
   /** Legacy bench_duration calibration scale; routine-linear ignores this field. */
@@ -59,7 +59,7 @@ export const hardwareEnergyProfiles: Record<string, HardwareEnergyProfileDef> = 
     id: "generic-nrf52840",
     label: "Generic nRF52840 BLE wearable",
     description:
-      "Routine-level linear energy (mixed bench fit): intercept + duty-weighted scan/advertise with fixed 3 s scan and 0.5 s advertise burst assumptions; +8 dBm fixed for radio.",
+      "Routine-level linear energy (mixed bench fit): intercept + duty-weighted scan/advertise with 3 s scan bursts and 1 s advertise bursts (+8 dBm fixed for radio).",
     batteryCapacityMah: 40,
     startingVoltage: 4.2,
     txPowerDbm: 8,

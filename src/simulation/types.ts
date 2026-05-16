@@ -208,7 +208,7 @@ export type EnergyConfig = {
   benchScanBurstCurrentMicroAmps: number;
   /**
    * Long-run advertising burst wall-time fraction used to calibrate active µA increments vs `measuredSocial5s20sTotalMicroAmps`
-   * (e.g. 0.5 s burst / 1 s adv interval = 0.5).
+   * (e.g. 1 s burst / 1 s adv interval = 1.0 for production discovery).
    */
   benchProductionAdvDuty: number;
   /**
@@ -231,7 +231,7 @@ export type FixedPolicyConfig = {
   scanIntervalSeconds: number;
   scanWindowSeconds: number;
   advIntervalSeconds: number;
-  /** On-air advertising burst length (firmware ADV_BURST_DURATION_MS / 1000). Defaults to production 0.5 s if omitted. */
+  /** On-air advertising burst length (firmware ADV_BURST_DURATION_MS / 1000). Defaults to production 1 s if omitted. */
   advertisingBurstDurationSeconds?: number;
   /**
    * When true, after each animal's consecutive no-motion time reaches its **movement bout mean** (minutes, sampled

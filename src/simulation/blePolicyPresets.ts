@@ -42,7 +42,7 @@ export function normalizeBlePolicyPresetId(id: string): string {
 
 /**
  * Adaptive timing anchors aligned with nRF52 production: scan intervals 60 → 30 → 10 s,
- * scan windows 1 → 3 → 5 s, advertise burst fixed at firmware `ADV_BURST_MS` (0.5 s).
+ * scan windows 1 → 3 → 5 s, advertise burst fixed at firmware `ADV_BURST_MS` (1 s).
  */
 export function focusedSweepAdaptiveTimingAnchors(): AdaptiveBleTimingAnchors {
   return {

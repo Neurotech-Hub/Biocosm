@@ -42,6 +42,6 @@ describe("BLE baseline vs hardware energy separation", () => {
     expect(fixed.scanIntervalSeconds).toBe(20);
     expect(fixed.scanWindowSeconds).toBe(3);
     expect(fixed.advIntervalSeconds).toBe(1);
-    expect(fixed.advertisingBurstDurationSeconds).toBe(0.5);
+    expect(fixed.advertisingBurstDurationSeconds).toBe(1);
   });
 });

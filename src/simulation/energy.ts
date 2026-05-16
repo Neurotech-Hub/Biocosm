@@ -9,7 +9,11 @@ import type { BleBurstEvent, EnergyConfig, EnergyLog, RoutineLinearEnergyCoeffic
 /** 1 mAh = 1 mA × 1 h = 3.6 C = 3_600_000 µC */
 export const MICROCOULOMBS_PER_MILLIAMP_HOUR = 3_600_000;
 
-/** Mixed-routine bench fit for `bench_routine_linear_v1` (not isolated scan-burst coefficients). */
+/**
+ * Mixed-routine bench fit for `bench_routine_linear_v1` (not isolated scan-burst coefficients).
+ * Coefficients were regressed when advertise bursts were 0.5 s; with 1 s firmware bursts, realized
+ * advertise duty doubles for the same intervals, so the advertise term contributes ~2× power.
+ */
 export const ROUTINE_LINEAR_ENERGY_COEFFICIENTS: RoutineLinearEnergyCoefficients = {
   interceptCurrentUa: 132.2,
   scanDutyCoeffUa: 725.6,

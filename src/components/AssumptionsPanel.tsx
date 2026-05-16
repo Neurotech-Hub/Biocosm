@@ -51,8 +51,9 @@ export function AssumptionsPanel({ config }: AssumptionsPanelProps) {
             </li>
             <li>
               Energy uses a routine-level linear bench fit: mean current is intercept + scan-duty and advertise-duty terms.
-              Burst durations follow the active BLE policy (default catalog baselines use short scan windows and 2 s advertise
-              bursts). Legacy bench copy may still cite 3 s / 0.5 s routines. Hardware assumes <strong>+8 dBm</strong> TX for
+              Burst durations follow the active BLE policy (default catalog baselines use 3 s scan windows and 1 s advertise
+              bursts). Bench regression coefficients were fit when advertise bursts were 0.5 s; 1 s firmware bursts double realized
+              advertise duty at the same intervals. Hardware assumes <strong>+8 dBm</strong> TX for
               RSSI priors.
             </li>
             <li>

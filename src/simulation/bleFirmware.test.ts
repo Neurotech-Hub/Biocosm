@@ -81,8 +81,8 @@ describe("BLE firmware alignment", () => {
     const adverts = bursts.filter((burst) => burst.kind === "advertise").length;
     expect(scans).toBeGreaterThanOrEqual(2);
     expect(scans).toBeLessThanOrEqual(4);
-    expect(adverts).toBeGreaterThanOrEqual(40);
-    expect(adverts).toBeLessThanOrEqual(55);
+    expect(adverts).toBeGreaterThanOrEqual(28);
+    expect(adverts).toBeLessThanOrEqual(40);
   });
 
   it("minute write safe zone changes scheduled burst times", () => {

@@ -14,7 +14,7 @@ const speciesTestBlePolicy: FixedPolicyConfig = {
   scanIntervalSeconds: 60,
   scanWindowSeconds: 3,
   advIntervalSeconds: 30,
-  advertisingBurstDurationSeconds: 0.5
+  advertisingBurstDurationSeconds: 1
 };
 
 describe("species circadian presets", () => {

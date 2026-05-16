@@ -89,7 +89,7 @@ describe("adaptive BLE sweep", () => {
       scheduledScanIntervalSeconds: 30,
       scheduledScanWindowSeconds: 3,
       scheduledAdvIntervalSeconds: 10,
-      scheduledAdvertisingBurstDurationSeconds: 0.5,
+      scheduledAdvertisingBurstDurationSeconds: 1,
       baselineDrive: null,
       motionWeight: null,
       peerWeight: null,
@@ -206,7 +206,7 @@ describe("adaptive BLE sweep", () => {
     expect(ref.scanIntervalSeconds).toBe(30);
     expect(ref.scanWindowSeconds).toBe(3);
     expect(ref.advIntervalSeconds).toBe(10);
-    expect(ref.advertisingBurstDurationSeconds).toBe(0.5);
+    expect(ref.advertisingBurstDurationSeconds).toBe(1);
     expect(defaultSimulationConfig.blePolicyPresetId).toBe("balanced-adaptive");
   });
 
@@ -234,7 +234,7 @@ describe("adaptive BLE sweep", () => {
         scanIntervalSeconds: 11,
         scanWindowSeconds: 2,
         advIntervalSeconds: 7,
-        advertisingBurstDurationSeconds: 0.5
+        advertisingBurstDurationSeconds: 1
       }
     };
     const baseline = baselineFixedPolicyForSweep(offGridCfg);

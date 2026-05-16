@@ -69,7 +69,7 @@ export const SWEEP_MINIMAL_MOTION_WEIGHTS = SWEEP_MOTION_WEIGHTS;
 export const SWEEP_MINIMAL_PEER_WEIGHTS = SWEEP_PEER_WEIGHTS;
 export const SWEEP_MINIMAL_TAU_PEER_SECONDS = SWEEP_TAU_PEER_SECONDS;
 
-/** Fixed-rate sweep holds firmware-aligned non-connectable advertise burst (0.5 s). */
+/** Fixed-rate sweep holds firmware-aligned non-connectable advertise burst (1 s). */
 export const SWEEP_FIXED_ADVERTISING_BURST_SECONDS = FOCUSED_SWEEP_FIXED_ADVERTISING_BURST_SECONDS;
 
 const SWEEP_FIXED_SCAN_INTERVALS = [10, 30, 60] as const;

@@ -11,7 +11,7 @@ const baseCollar = {
   scanIntervalSeconds: 10,
   scanWindowSeconds: 3,
   advIntervalSeconds: 5,
-  advertisingBurstDurationSeconds: 0.5,
+  advertisingBurstDurationSeconds: 1,
   scanPhaseOffsetSeconds: 0,
   advPhaseOffsetSeconds: 0,
   motionDrive: 0.5,
