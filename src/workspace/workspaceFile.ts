@@ -5,7 +5,6 @@ import {
   hardwareEnergyProfiles,
   normalizeHardwareEnergyProfileId
 } from "../simulation/hardwareEnergyProfiles";
-import { defaultSweepGridVariant, type SweepGridVariant } from "../simulation/sweep/adaptiveBleSweep";
 import type { SimulationConfig } from "../simulation/types";
 
 export const WORKSPACE_SCHEMA = "biocosm.workspace" as const;
@@ -22,7 +21,6 @@ export type BiocosmWorkspaceFileV2 = {
   view: { showTrueProximity: boolean; showObservedDetections: boolean };
   sweep: {
     mode: "fast" | "report";
-    gridVariant: SweepGridVariant;
     reportSeedCount: number;
     wasRun: boolean;
   };
@@ -32,7 +30,6 @@ export type WorkspaceLoadParams = {
   config: SimulationConfig;
   view: { showTrueProximity: boolean; showObservedDetections: boolean };
   sweepMode: "fast" | "report";
-  sweepGridVariant: SweepGridVariant;
   reportSeedCount: number;
   shouldRunSweep: boolean;
   workspaceTab: WorkspaceTab;
@@ -44,10 +41,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function isSweepGridVariant(value: unknown): value is SweepGridVariant {
-  return value === "minimal" || value === "quick" || value === "full";
 }
 
 function isWorkspaceTab(value: unknown): value is WorkspaceTab {
@@ -112,7 +105,6 @@ export function buildWorkspaceFile(params: WorkspaceLoadParams): BiocosmWorkspac
     view: params.view,
     sweep: {
       mode: params.sweepMode,
-      gridVariant: params.sweepGridVariant,
       reportSeedCount: params.reportSeedCount,
       wasRun: params.shouldRunSweep
     }
@@ -135,12 +127,6 @@ function parseWorkspaceV2(parsed: Record<string, unknown>, warnings: string[]): 
     warnings.push("Invalid sweep.mode; defaulting to fast.");
     sweepMode = "fast";
   }
-  const gridVariant: SweepGridVariant = isSweepGridVariant(sw.gridVariant)
-    ? sw.gridVariant
-    : defaultSweepGridVariant();
-  if (sw.gridVariant != null && !isSweepGridVariant(sw.gridVariant)) {
-    warnings.push("Invalid sweep.gridVariant; using default grid.");
-  }
   const reportSeedCount = isFiniteNumber(sw.reportSeedCount)
     ? Math.min(5, Math.max(1, Math.floor(sw.reportSeedCount)))
     : 3;
@@ -150,7 +136,6 @@ function parseWorkspaceV2(parsed: Record<string, unknown>, warnings: string[]): 
     config,
     view: { showTrueProximity, showObservedDetections },
     sweepMode,
-    sweepGridVariant: gridVariant,
     reportSeedCount,
     shouldRunSweep,
     workspaceTab: "simulator"
@@ -174,12 +159,6 @@ function parseWorkspaceV1(parsed: Record<string, unknown>, warnings: string[]): 
     warnings.push("Invalid sweep.mode; defaulting to fast.");
     sweepMode = "fast";
   }
-  const gridVariant: SweepGridVariant = isSweepGridVariant(sw.gridVariant)
-    ? sw.gridVariant
-    : defaultSweepGridVariant();
-  if (sw.gridVariant != null && !isSweepGridVariant(sw.gridVariant)) {
-    warnings.push("Invalid sweep.gridVariant; using default grid.");
-  }
   const reportSeedCount = isFiniteNumber(sw.reportSeedCount)
     ? Math.min(5, Math.max(1, Math.floor(sw.reportSeedCount)))
     : 3;
@@ -199,7 +178,6 @@ function parseWorkspaceV1(parsed: Record<string, unknown>, warnings: string[]): 
     config,
     view: { showTrueProximity, showObservedDetections },
     sweepMode,
-    sweepGridVariant: gridVariant,
     reportSeedCount,
     shouldRunSweep,
     workspaceTab

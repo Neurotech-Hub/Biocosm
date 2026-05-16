@@ -485,7 +485,7 @@ export function buildSweepTrials(
 
 /** Counts and axes for the Sweep sidebar (“what this sweep exercises”). */
 export function sweepExecutionSummary(input: {
-  gridVariant: SweepGridVariant;
+  gridVariant?: SweepGridVariant;
   mode: "fast" | "report";
   builtSeed: string;
   reportSeedCount?: number;

@@ -16,7 +16,6 @@ describe("workspaceFile", () => {
       config: { ...defaultSimulationConfig, seed: "workspace-v2" },
       view: { showTrueProximity: false, showObservedDetections: true },
       sweepMode: "report",
-      sweepGridVariant: "full",
       reportSeedCount: 4,
       shouldRunSweep: true,
       workspaceTab: "simulator"
@@ -31,8 +30,8 @@ describe("workspaceFile", () => {
     expect(parsed.data.config.seed).toBe("workspace-v2");
     expect(parsed.data.view.showTrueProximity).toBe(false);
     expect(parsed.data.sweepMode).toBe("report");
-    expect(parsed.data.sweepGridVariant).toBe("full");
     expect(parsed.data.reportSeedCount).toBe(4);
+    expect(JSON.parse(text).sweep.gridVariant).toBeUndefined();
     expect(parsed.data.shouldRunSweep).toBe(true);
   });
 
@@ -41,7 +40,6 @@ describe("workspaceFile", () => {
       config: defaultSimulationConfig,
       view: { showTrueProximity: true, showObservedDetections: true },
       sweepMode: "fast",
-      sweepGridVariant: "quick",
       reportSeedCount: 3,
       shouldRunSweep: false,
       workspaceTab: "simulator"
@@ -68,7 +66,6 @@ describe("workspaceFile", () => {
       config: { ...defaultSimulationConfig, seed: "hw-mig", hardwareEnergyProfileId: "juxta-v56" },
       view: { showTrueProximity: true, showObservedDetections: true },
       sweepMode: "fast",
-      sweepGridVariant: "quick",
       reportSeedCount: 3,
       shouldRunSweep: false,
       workspaceTab: "simulator"

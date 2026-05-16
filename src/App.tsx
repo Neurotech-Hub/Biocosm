@@ -15,12 +15,10 @@ import { defaultSimulationConfig } from "./simulation/config";
 import { mergeLogs, stepSimulation } from "./simulation/engine";
 import {
   buildSweepTrials,
-  defaultSweepGridVariant,
   finalizeSweepBundle,
   firmwarePolicyFromSweepSummary,
   runSweepTrialsChunked,
-  type SweepBundleWithCandidates,
-  type SweepGridVariant
+  type SweepBundleWithCandidates
 } from "./simulation/sweep/adaptiveBleSweep";
 import type { SweepPolicySummary } from "./simulation/sweep/sweepCandidates";
 import {
@@ -92,7 +90,6 @@ export function App() {
   const [showObservedDetections, setShowObservedDetections] = useState(true);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("simulator");
   const [sweepMode, setSweepMode] = useState<"fast" | "report">("fast");
-  const [sweepGridVariant, setSweepGridVariant] = useState<SweepGridVariant>(() => defaultSweepGridVariant());
   const [reportSeedCount, setReportSeedCount] = useState(3);
   const [sweepRunning, setSweepRunning] = useState(false);
   const [sweepProgress, setSweepProgress] = useState({ completed: 0, total: 0 });
@@ -183,7 +180,6 @@ export function App() {
     const myGeneration = ++sweepRunGenerationRef.current;
     setSweepResult(null);
     const trials = buildSweepTrials(sweepMode, String(builtConfig.seed), {
-      gridVariant: sweepGridVariant,
       reportSeedCount: sweepMode === "report" ? reportSeedCount : undefined,
       simulationConfig: builtConfig
     });
@@ -224,7 +220,6 @@ export function App() {
     setSweepError(null);
     setSweepResult(null);
     const trials = buildSweepTrials(params.sweepMode, String(params.config.seed), {
-      gridVariant: params.sweepGridVariant,
       reportSeedCount: params.sweepMode === "report" ? params.reportSeedCount : undefined,
       simulationConfig: params.config
     });
@@ -266,7 +261,6 @@ export function App() {
     setShowTrueProximity(params.view.showTrueProximity);
     setShowObservedDetections(params.view.showObservedDetections);
     setSweepMode(params.sweepMode);
-    setSweepGridVariant(params.sweepGridVariant);
     setReportSeedCount(params.reportSeedCount);
     setSweepResult(null);
     setWorkspaceTab(params.workspaceTab);
@@ -329,7 +323,6 @@ export function App() {
         config: draftConfig,
         view: { showTrueProximity, showObservedDetections },
         sweepMode,
-        sweepGridVariant,
         reportSeedCount,
         shouldRunSweep: sweepResult != null,
         workspaceTab
@@ -545,8 +538,6 @@ export function App() {
             isSimulationStale={isBuildDirty}
             sweepMode={sweepMode}
             onSweepModeChange={setSweepMode}
-            sweepGridVariant={sweepGridVariant}
-            onSweepGridVariantChange={setSweepGridVariant}
             reportSeedCount={reportSeedCount}
             onReportSeedCountChange={(n) => setReportSeedCount(Math.min(5, Math.max(1, n)))}
             isSweepRunning={sweepRunning}
